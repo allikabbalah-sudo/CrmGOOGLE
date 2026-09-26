@@ -19,6 +19,7 @@ import { dataStore } from '../../lib/dataStore';
 import { formatHebrewDate } from '../../lib/utils';
 import { CreateOrgModal } from '../dialogs/CreateOrgModal';
 import { ImportDataModal } from '../dialogs/ImportDataModal';
+import { PWAInstallButton } from '../pwa/PWAInstallButton';
 
 interface TopBarProps {
   onNavigate: (path: string) => void;
@@ -159,6 +160,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate }) => {
           >
             + לקוח חדש
           </button>
+
+          {/* PWA Install Button */}
+          <PWAInstallButton variant="header" />
 
         {/* Dark mode toggle */}
         <button

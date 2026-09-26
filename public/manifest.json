@@ -1,0 +1,34 @@
+{
+  "id": "/",
+  "name": "Kabbalah CRM — ניהול קליניקה טיפולית",
+  "short_name": "KabbalahCRM",
+  "description": "מערכת CRM מתקדמת לניהול קליניקה טיפולית קבלית ואנרגטית",
+  "theme_color": "#0d9488",
+  "background_color": "#042f2e",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "start_url": "/",
+  "scope": "/",
+  "dir": "rtl",
+  "lang": "he",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

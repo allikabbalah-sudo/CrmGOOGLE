@@ -30,6 +30,7 @@ import {
   logoutGoogleCalendar,
 } from '../lib/googleCalendar';
 import JSZip from 'jszip';
+import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
 
 export const SettingsView: React.FC = () => {
   const { currentOrg, members, pendingApprovals, reloadOrg } = useOrganization();
@@ -288,20 +289,8 @@ export const SettingsView: React.FC = () => {
         </div>
 
         {/* PWA & Mobile Install Card */}
-        <div className="bg-card border border-border rounded-2xl p-5 shadow-xs space-y-3">
-          <div className="flex items-center gap-2 text-primary font-bold text-sm">
-            <Smartphone className="w-5 h-5" />
-            התקנת אפליקציה במכשיר (PWA)
-          </div>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            המערכת מותאמת להתקנה כאפליקציה עצמאית במכשיר הנייד ובמחשב. התקן לקבלת שיתוף קבצים ישיר והתראות.
-          </p>
-          <button
-            onClick={() => alert('להתקנת PWA: לחץ על שלוש הנקודות בדפדפן ובחר "הוסף למסך הבית" / "התקן אפליקציה"')}
-            className="w-full py-2 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold rounded-xl border border-primary/20 transition-colors"
-          >
-            הוראות התקנה למסך הבית
-          </button>
+        <div className="md:col-span-2">
+          <PWAInstallButton variant="card" />
         </div>
 
         {/* Web Push Notifications Card */}

@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { SidebarNav } from './SidebarNav';
 import { TopBar } from './TopBar';
 import { BottomNav } from './BottomNav';
+import { OfflineIndicator } from '../pwa/OfflineIndicator';
 import { dataStore } from '../../lib/dataStore';
 
 interface AppLayoutProps {
@@ -65,6 +66,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
 
       {/* Mobile Bottom Navigation */}
       <BottomNav currentPath={currentPath} onNavigate={onNavigate} />
+
+      {/* PWA Offline Connectivity Indicator */}
+      <OfflineIndicator />
     </div>
   );
 };
