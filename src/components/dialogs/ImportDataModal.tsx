@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   FileArchive,
   Upload,
@@ -12,9 +12,12 @@ import {
   UserCheck,
   Check,
   Plus,
+  RefreshCw,
+  UserPlus,
+  FastForward,
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { dataStore, ImportMappingItem } from '../../lib/dataStore';
+import { dataStore, ImportMappingItem, findExistingClientMatch } from '../../lib/dataStore';
 import { useOrganization } from '../../context/OrganizationContext';
 import { formatFileSize, generateUUID } from '../../lib/utils';
 
@@ -119,10 +122,54 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successResult, setSuccessResult] = useState<Record<string, number> | null>(null);
-
-  if (!isOpen) return null;
+  const [mergeStrategy, setMergeStrategy] = useState<'merge_and_update' | 'skip_existing' | 'add_all_as_new'>('merge_and_update');
+  const [detailedSuccess, setDetailedSuccess] = useState<{
+    importedCounts: Record<string, number>;
+    updatedClientsCount: number;
+    newClientsCount: number;
+    skippedClientsCount: number;
+  } | null>(null);
 
   const existingClients = dataStore.getClients() || [];
+
+  const clientMatchStats = useMemo(() => {
+    let total = 0;
+    let matched = 0;
+    const currentClients = existingClients;
+
+    parsedFiles.forEach((file) => {
+      if (file.detectedType === 'clients') {
+        (file.items || []).forEach((c) => {
+          if (c && typeof c === 'object') {
+            total++;
+            if (findExistingClientMatch(c, currentClients)) {
+              matched++;
+            }
+          }
+        });
+      } else if (file.detectedType === 'full_export') {
+        const obj = file.items?.[0] || {};
+        if (Array.isArray(obj.clients)) {
+          obj.clients.forEach((c: any) => {
+            if (c && typeof c === 'object') {
+              total++;
+              if (findExistingClientMatch(c, currentClients)) {
+                matched++;
+              }
+            }
+          });
+        }
+      }
+    });
+
+    return {
+      total,
+      matched,
+      newCount: Math.max(0, total - matched),
+    };
+  }, [parsedFiles, existingClients]);
+
+  if (!isOpen) return null;
 
   const guessEntityType = (fileName: string, sampleObj: any): ImportMappingItem['entityType'] => {
     const fn = fileName.toLowerCase();
@@ -374,8 +421,11 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
 
     try {
       const importedCounts: Record<string, number> = {};
+      let updatedClientsCount = 0;
+      let newClientsCount = 0;
+      let skippedClientsCount = 0;
 
-      // 1. Import mapped JSON files
+      // 1. Import mapped JSON files with chosen merge strategy
       if (parsedFiles.length > 0) {
         const mappings: ImportMappingItem[] = parsedFiles.map((pf) => ({
           fileName: pf.fileName,
@@ -383,8 +433,11 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           items: pf.items,
         }));
 
-        const res = dataStore.importMappedJsonEntities(mappings);
+        const res = dataStore.importMappedJsonEntities(mappings, { mergeStrategy });
         Object.assign(importedCounts, res.importedCounts);
+        updatedClientsCount = res.updatedClientsCount;
+        newClientsCount = res.newClientsCount;
+        skippedClientsCount = res.skippedClientsCount;
       }
 
       // 2. Import parsed media files and link to selected clients
@@ -406,6 +459,12 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
       }
 
       setSuccessResult(importedCounts);
+      setDetailedSuccess({
+        importedCounts,
+        updatedClientsCount,
+        newClientsCount,
+        skippedClientsCount,
+      });
       if (onImportComplete) onImportComplete();
     } catch (err: any) {
       setError(err.message || 'שגיאה בביצוע הייבוא');
@@ -467,9 +526,33 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               <div>
                 <h4 className="font-black text-lg text-teal-700 dark:text-teal-300">הייבוא הושלם בהצלחה!</h4>
                 <p className="text-xs text-muted-foreground mt-1">
-                  כל הנתונים והמדיה שויכו והתווספו בהצלחה לקליניקה הפעילה
+                  כל הנתונים והמדיה שויכו בהצלחה לקליניקה הפעילה
                 </p>
               </div>
+
+              {/* Client Deduplication & Update Breakdown */}
+              {detailedSuccess && (detailedSuccess.updatedClientsCount > 0 || detailedSuccess.newClientsCount > 0 || detailedSuccess.skippedClientsCount > 0) && (
+                <div className="flex flex-wrap items-center justify-center gap-2 p-3 bg-card border border-teal-500/20 rounded-xl text-xs">
+                  {detailedSuccess.updatedClientsCount > 0 && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-lg font-bold">
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>{detailedSuccess.updatedClientsCount} לקוחות קיימים עודכנו (נמנעה כפילות)</span>
+                    </div>
+                  )}
+                  {detailedSuccess.newClientsCount > 0 && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 rounded-lg font-bold">
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>{detailedSuccess.newClientsCount} לקוחות חדשים נוספו</span>
+                    </div>
+                  )}
+                  {detailedSuccess.skippedClientsCount > 0 && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-500/10 text-slate-700 dark:text-slate-300 rounded-lg font-bold">
+                      <FastForward className="w-3.5 h-3.5" />
+                      <span>{detailedSuccess.skippedClientsCount} לקוחות קיימים דולגו</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs pt-2">
                 {Object.entries(successResult).map(([key, count]) => {
@@ -619,6 +702,92 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                 </div>
               )}
 
+              {/* Duplicate Client Handling Strategy Card */}
+              {parsedFiles.length > 0 && (
+                <div className="bg-card border border-teal-500/30 rounded-2xl p-4 space-y-3 bg-teal-500/5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <div className="flex items-center gap-2">
+                      <UserCheck className="w-5 h-5 text-teal-600 dark:text-teal-400 shrink-0" />
+                      <span className="font-bold text-xs sm:text-sm text-foreground">
+                        מדיניות זיהוי לקוחות כפולים
+                      </span>
+                    </div>
+                    {clientMatchStats.total > 0 && (
+                      <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/20 self-start sm:self-auto">
+                        {clientMatchStats.matched > 0
+                          ? `זוהו ${clientMatchStats.matched} קיימים (יעודכנו) | ${clientMatchStats.newCount} חדשים`
+                          : `${clientMatchStats.total} לקוחות חדשים להוספה`}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                    <label className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-all ${
+                      mergeStrategy === 'merge_and_update'
+                        ? 'bg-teal-500/15 border-teal-500 font-semibold text-teal-950 dark:text-teal-100 shadow-2xs'
+                        : 'bg-card border-border hover:bg-muted/50 text-muted-foreground'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <input
+                          type="radio"
+                          name="mergeStrategy"
+                          value="merge_and_update"
+                          checked={mergeStrategy === 'merge_and_update'}
+                          onChange={() => setMergeStrategy('merge_and_update')}
+                          className="text-teal-600 focus:ring-teal-500"
+                        />
+                        <span className="font-bold text-xs text-foreground">עדכן לקוחות קיימים (מומלץ)</span>
+                      </div>
+                      <span className="text-[10px] leading-relaxed text-muted-foreground">
+                        מזהה לפי טלפון, אימייל, ת.ז או שם מלא ומעדכן את כרטיס הלקוח הקיים ללא כפילות
+                      </span>
+                    </label>
+
+                    <label className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-all ${
+                      mergeStrategy === 'skip_existing'
+                        ? 'bg-teal-500/15 border-teal-500 font-semibold text-teal-950 dark:text-teal-100 shadow-2xs'
+                        : 'bg-card border-border hover:bg-muted/50 text-muted-foreground'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <input
+                          type="radio"
+                          name="mergeStrategy"
+                          value="skip_existing"
+                          checked={mergeStrategy === 'skip_existing'}
+                          onChange={() => setMergeStrategy('skip_existing')}
+                          className="text-teal-600 focus:ring-teal-500"
+                        />
+                        <span className="font-bold text-xs text-foreground">דלג על לקוחות קיימים</span>
+                      </div>
+                      <span className="text-[10px] leading-relaxed text-muted-foreground">
+                        שומר על לקוחות קיימים ללא שינוי, ומוסיף רק לקוחות חדשים שאינם במערכת
+                      </span>
+                    </label>
+
+                    <label className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-all ${
+                      mergeStrategy === 'add_all_as_new'
+                        ? 'bg-teal-500/15 border-teal-500 font-semibold text-teal-950 dark:text-teal-100 shadow-2xs'
+                        : 'bg-card border-border hover:bg-muted/50 text-muted-foreground'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <input
+                          type="radio"
+                          name="mergeStrategy"
+                          value="add_all_as_new"
+                          checked={mergeStrategy === 'add_all_as_new'}
+                          onChange={() => setMergeStrategy('add_all_as_new')}
+                          className="text-teal-600 focus:ring-teal-500"
+                        />
+                        <span className="font-bold text-xs text-foreground">הוסף הכל כחדשים</span>
+                      </div>
+                      <span className="text-[10px] leading-relaxed text-muted-foreground">
+                        יוצר כרטיס חדש לכל לקוח גם אם קיים לקוח זהה במערכת (יוצר כפילות)
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
               {/* Parsed JSON Files List with Dropdown Mapping */}
               {parsedFiles.length > 0 && (
                 <div className="space-y-3 pt-1">
@@ -696,7 +865,11 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               className="px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
               <CheckCircle2 className="w-4 h-4" />
-              בצע ייבוא לארגון {activeOrg?.name || ''}
+              {mergeStrategy === 'merge_and_update'
+                ? `בצע ייבוא ומיזוג חכם (${activeOrg?.name || ''})`
+                : mergeStrategy === 'skip_existing'
+                ? `בצע ייבוא (דילוג על לקוחות קיימים)`
+                : `בצע ייבוא (הוספת הכל כחדשים)`}
             </button>
           </div>
         )}

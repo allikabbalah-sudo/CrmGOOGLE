@@ -85,6 +85,102 @@ export function deduplicateById<T extends { id?: string }>(arr: T[] | undefined)
   return result;
 }
 
+export function normalizePhoneForMatching(phone?: string): string {
+  if (!phone) return '';
+  let digits = String(phone).replace(/\D/g, '');
+  if (digits.startsWith('972') && digits.length >= 11) {
+    digits = '0' + digits.slice(3);
+  }
+  return digits;
+}
+
+export function normalizeEmailForMatching(email?: string): string {
+  if (!email) return '';
+  return String(email).trim().toLowerCase();
+}
+
+export function normalizeNameForMatching(name?: string): string {
+  if (!name) return '';
+  return String(name).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function findExistingClientMatch(
+  imported: Partial<Client>,
+  existingClients: Client[]
+): Client | undefined {
+  if (!existingClients || existingClients.length === 0 || !imported) return undefined;
+
+  // 1. Direct ID match
+  if (imported.id) {
+    const byId = existingClients.find((c) => c && c.id === imported.id);
+    if (byId) return byId;
+  }
+
+  // 2. Phone match (ignoring dashes, spaces, +972)
+  const normPhone = normalizePhoneForMatching(imported.phone);
+  if (normPhone && normPhone.length >= 7) {
+    const byPhone = existingClients.find((c) => {
+      const cNorm = normalizePhoneForMatching(c.phone);
+      return cNorm && cNorm === normPhone;
+    });
+    if (byPhone) return byPhone;
+  }
+
+  // 3. Email match (case-insensitive)
+  const normEmail = normalizeEmailForMatching(imported.email);
+  if (normEmail && normEmail.includes('@') && normEmail.length >= 5) {
+    const byEmail = existingClients.find((c) => {
+      const cNorm = normalizeEmailForMatching(c.email);
+      return cNorm && cNorm === normEmail;
+    });
+    if (byEmail) return byEmail;
+  }
+
+  // 4. Exact Full Name match (trimmed, case-insensitive)
+  const normName = normalizeNameForMatching(imported.full_name);
+  if (normName && normName.length >= 2) {
+    const byName = existingClients.find((c) => {
+      const cNorm = normalizeNameForMatching(c.full_name);
+      return cNorm && cNorm === normName;
+    });
+    if (byName) return byName;
+  }
+
+  return undefined;
+}
+
+export function mergeClientRecord(existing: Client, imported: Partial<Client>): Client {
+  const isNotEmpty = (val: any) => val !== undefined && val !== null && String(val).trim() !== '';
+
+  const mergedNotes = () => {
+    const exNotes = existing.notes?.trim() || '';
+    const imNotes = imported.notes?.trim() || '';
+    if (!imNotes) return exNotes;
+    if (!exNotes) return imNotes;
+    if (exNotes.includes(imNotes)) return exNotes;
+    return `${exNotes}\n---\n${imNotes}`;
+  };
+
+  return {
+    ...existing,
+    full_name: isNotEmpty(imported.full_name) ? String(imported.full_name).trim() : existing.full_name,
+    phone: isNotEmpty(imported.phone) ? String(imported.phone).trim() : existing.phone,
+    email: isNotEmpty(imported.email) ? String(imported.email).trim() : existing.email,
+    address: isNotEmpty(imported.address) ? String(imported.address).trim() : existing.address,
+    mother_name: isNotEmpty(imported.mother_name) ? String(imported.mother_name).trim() : existing.mother_name,
+    date_of_birth: isNotEmpty(imported.date_of_birth) ? String(imported.date_of_birth).trim() : existing.date_of_birth,
+    status: isNotEmpty(imported.status) ? (imported.status as ClientStatus) : existing.status,
+    notes: mergedNotes(),
+    assigned_to: isNotEmpty(imported.assigned_to) ? imported.assigned_to : existing.assigned_to,
+    avatar_url: isNotEmpty(imported.avatar_url) ? imported.avatar_url : existing.avatar_url,
+    selected_reading: isNotEmpty(imported.selected_reading) ? imported.selected_reading : existing.selected_reading,
+    partner_full_name: isNotEmpty(imported.partner_full_name) ? imported.partner_full_name : existing.partner_full_name,
+    partner_dob: isNotEmpty(imported.partner_dob) ? imported.partner_dob : existing.partner_dob,
+    partner_mother_name: isNotEmpty(imported.partner_mother_name) ? imported.partner_mother_name : existing.partner_mother_name,
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export function stripUndefinedDeep<T>(value: T): T {
   if (value === undefined) {
     return null as any;
@@ -1666,17 +1762,89 @@ class DataStore {
     };
   }
 
-  public importAllData(data: any) {
-    if (data.clients && Array.isArray(data.clients)) this.state.clients = deduplicateById(data.clients);
-    if (data.programs && Array.isArray(data.programs)) this.state.programs = deduplicateById(data.programs);
-    if (data.sessions && Array.isArray(data.sessions)) this.state.sessions = deduplicateById(data.sessions);
-    if (data.tasks && Array.isArray(data.tasks)) this.state.tasks = deduplicateById(data.tasks);
-    if (data.mediaFiles && Array.isArray(data.mediaFiles)) this.state.mediaFiles = deduplicateById(data.mediaFiles);
-    if (data.activityLogs && Array.isArray(data.activityLogs)) this.state.activityLogs = deduplicateById(data.activityLogs);
+  public importAllData(
+    data: any,
+    options?: { mergeStrategy?: 'merge_and_update' | 'skip_existing' | 'add_all_as_new' }
+  ) {
+    const mergeStrategy = options?.mergeStrategy || 'merge_and_update';
+    if (!data || typeof data !== 'object') return;
+
+    if (data.clients && Array.isArray(data.clients)) {
+      const clientIdRemap: Record<string, string> = {};
+      data.clients.forEach((c: any) => {
+        if (!c || typeof c !== 'object') return;
+        const origId = c.id ? String(c.id).trim() : '';
+
+        if (mergeStrategy === 'add_all_as_new') {
+          const newId = generateUUID();
+          if (origId) clientIdRemap[origId] = newId;
+          this.state.clients.push({ ...c, id: newId });
+          return;
+        }
+
+        const match = findExistingClientMatch(c, this.state.clients);
+        if (match) {
+          if (origId && origId !== match.id) clientIdRemap[origId] = match.id;
+          if (mergeStrategy === 'merge_and_update') {
+            const merged = mergeClientRecord(match, c);
+            const idx = this.state.clients.findIndex((x) => x.id === match.id);
+            if (idx >= 0) this.state.clients[idx] = merged;
+          }
+        } else {
+          const newId = origId || generateUUID();
+          if (origId) clientIdRemap[origId] = newId;
+          this.state.clients.push({ ...c, id: newId });
+        }
+      });
+
+      // Remap client IDs in related tables if present
+      const remapClientIdInList = (list?: any[]) => {
+        if (!Array.isArray(list)) return;
+        list.forEach((item) => {
+          if (item && item.client_id && clientIdRemap[item.client_id]) {
+            item.client_id = clientIdRemap[item.client_id];
+          }
+          if (item && item.parent_id && clientIdRemap[item.parent_id]) {
+            item.parent_id = clientIdRemap[item.parent_id];
+          }
+        });
+      };
+
+      remapClientIdInList(data.programs);
+      remapClientIdInList(data.sessions);
+      remapClientIdInList(data.tasks);
+      remapClientIdInList(data.mediaFiles);
+    }
+
+    if (data.programs && Array.isArray(data.programs)) {
+      this.state.programs = deduplicateById([...this.state.programs, ...data.programs]);
+    }
+    if (data.sessions && Array.isArray(data.sessions)) {
+      this.state.sessions = deduplicateById([...this.state.sessions, ...data.sessions]);
+    }
+    if (data.tasks && Array.isArray(data.tasks)) {
+      this.state.tasks = deduplicateById([...this.state.tasks, ...data.tasks]);
+    }
+    if (data.mediaFiles && Array.isArray(data.mediaFiles)) {
+      this.state.mediaFiles = deduplicateById([...this.state.mediaFiles, ...data.mediaFiles]);
+    }
+    if (data.activityLogs && Array.isArray(data.activityLogs)) {
+      this.state.activityLogs = deduplicateById([...this.state.activityLogs, ...data.activityLogs]);
+    }
     this.saveState();
   }
 
-  public importMappedJsonEntities(mappings: ImportMappingItem[]): { success: boolean; importedCounts: Record<string, number> } {
+  public importMappedJsonEntities(
+    mappings: ImportMappingItem[],
+    options?: { mergeStrategy?: 'merge_and_update' | 'skip_existing' | 'add_all_as_new' }
+  ): {
+    success: boolean;
+    importedCounts: Record<string, number>;
+    updatedClientsCount: number;
+    newClientsCount: number;
+    skippedClientsCount: number;
+  } {
+    const mergeStrategy = options?.mergeStrategy || 'merge_and_update';
     const counts: Record<string, number> = {
       clients: 0,
       programs: 0,
@@ -1686,62 +1854,166 @@ class DataStore {
       activityLogs: 0,
       notifications: 0,
     };
+    let updatedClientsCount = 0;
+    let newClientsCount = 0;
+    let skippedClientsCount = 0;
 
     const targetOrgId = this.state.activeOrgId;
     if (!targetOrgId) {
       throw new Error('אין ארגון פעיל. אנא בחר או צור ארגון חדש ראשית.');
     }
 
-    const upsertItem = (arr: any[], item: any) => {
-      const idx = arr.findIndex((x) => x && x.id === item.id);
-      if (idx >= 0) {
-        arr[idx] = { ...arr[idx], ...item };
-      } else {
-        arr.push(item);
-      }
-    };
+    // Map to remap old client IDs to existing/new client IDs for linked entities
+    const clientIdRemap: Record<string, string> = {};
+
+    // 1. Separate client entities so they are ALWAYS processed first
+    const clientItemsToProcess: any[] = [];
+    const otherMappings: { entityType: keyof AppState; item: any }[] = [];
 
     mappings.forEach((mapping) => {
       if (mapping.entityType === 'ignore' || !mapping.items || !Array.isArray(mapping.items)) return;
 
       if (mapping.entityType === 'full_export') {
         const obj = mapping.items[0] || {};
-        const entityKeys = ['clients', 'programs', 'sessions', 'tasks', 'mediaFiles', 'activityLogs', 'notifications'] as const;
-        entityKeys.forEach((key) => {
-          if (Array.isArray(obj[key])) {
-            obj[key].forEach((item: any) => {
-              if (typeof item === 'object' && item !== null) {
-                const prepared = {
-                  ...item,
-                  id: item.id || generateUUID(),
-                  organization_id: targetOrgId,
-                };
-                upsertItem(this.state[key] as any[], prepared);
-                counts[key] = (counts[key] || 0) + 1;
-              }
+        if (Array.isArray(obj.clients)) {
+          obj.clients.forEach((c: any) => {
+            if (c && typeof c === 'object') clientItemsToProcess.push(c);
+          });
+        }
+        const otherKeys = ['programs', 'sessions', 'tasks', 'mediaFiles', 'activityLogs', 'notifications'] as const;
+        otherKeys.forEach((k) => {
+          if (Array.isArray(obj[k])) {
+            obj[k].forEach((it: any) => {
+              if (it && typeof it === 'object') otherMappings.push({ entityType: k, item: it });
             });
           }
         });
+      } else if (mapping.entityType === 'clients') {
+        mapping.items.forEach((item) => {
+          if (item && typeof item === 'object') clientItemsToProcess.push(item);
+        });
+      } else {
+        const key = mapping.entityType as keyof AppState;
+        mapping.items.forEach((item) => {
+          if (item && typeof item === 'object') otherMappings.push({ entityType: key, item });
+        });
+      }
+    });
+
+    // 2. Process Clients with smart deduplication & merge
+    clientItemsToProcess.forEach((importedClient) => {
+      const origId = importedClient.id ? String(importedClient.id).trim() : '';
+
+      if (mergeStrategy === 'add_all_as_new') {
+        const newId = generateUUID();
+        if (origId) clientIdRemap[origId] = newId;
+        const newClient: Client = {
+          ...importedClient,
+          id: newId,
+          organization_id: targetOrgId,
+          created_at: importedClient.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        this.state.clients.push(newClient);
+        newClientsCount++;
+        counts.clients++;
         return;
       }
 
-      mapping.items.forEach((item) => {
-        if (typeof item !== 'object' || item === null) return;
-        const prepared = {
-          ...item,
-          id: item.id || generateUUID(),
-          organization_id: targetOrgId,
-        };
-        const key = mapping.entityType as keyof AppState;
-        if (Array.isArray(this.state[key])) {
-          upsertItem(this.state[key] as any[], prepared);
-          counts[mapping.entityType] = (counts[mapping.entityType] || 0) + 1;
+      // Find existing match by ID, phone, email, or full_name
+      const existingMatch = findExistingClientMatch(importedClient, this.state.clients);
+
+      if (existingMatch) {
+        // Record ID remapping if the imported item had a different ID
+        if (origId && origId !== existingMatch.id) {
+          clientIdRemap[origId] = existingMatch.id;
         }
-      });
+
+        if (mergeStrategy === 'merge_and_update') {
+          // Merge data into existing client without wiping good fields
+          const merged = mergeClientRecord(existingMatch, importedClient);
+          merged.organization_id = targetOrgId;
+          const idx = this.state.clients.findIndex((c) => c.id === existingMatch.id);
+          if (idx >= 0) {
+            this.state.clients[idx] = merged;
+          }
+          updatedClientsCount++;
+          counts.clients++;
+        } else if (mergeStrategy === 'skip_existing') {
+          skippedClientsCount++;
+        }
+      } else {
+        // No match found -> create new client
+        const newId = origId || generateUUID();
+        if (origId) clientIdRemap[origId] = newId;
+        const newClient: Client = {
+          ...importedClient,
+          id: newId,
+          organization_id: targetOrgId,
+          created_at: importedClient.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        this.state.clients.push(newClient);
+        newClientsCount++;
+        counts.clients++;
+      }
+    });
+
+    // 3. Process remaining entities with ID remapping & deduplication
+    otherMappings.forEach(({ entityType, item }) => {
+      const prepared = { ...item, organization_id: targetOrgId };
+
+      // Remap client_id or parent_id
+      if (prepared.client_id && clientIdRemap[prepared.client_id]) {
+        prepared.client_id = clientIdRemap[prepared.client_id];
+      }
+      if (prepared.parent_id && clientIdRemap[prepared.parent_id]) {
+        prepared.parent_id = clientIdRemap[prepared.parent_id];
+      }
+
+      const arr = this.state[entityType] as any[];
+      if (!Array.isArray(arr)) return;
+
+      // Smart upsert for programs/sessions/tasks to avoid duplicate sessions or tasks
+      let existingIdx = -1;
+      if (prepared.id) {
+        existingIdx = arr.findIndex((x) => x && x.id === prepared.id);
+      }
+
+      // If no ID match, check for logical match
+      if (existingIdx === -1) {
+        if (entityType === 'programs' && prepared.client_id && prepared.title) {
+          existingIdx = arr.findIndex(
+            (p) => p && p.client_id === prepared.client_id && p.title === prepared.title
+          );
+        } else if (entityType === 'sessions' && prepared.client_id && prepared.session_date) {
+          existingIdx = arr.findIndex(
+            (s) => s && s.client_id === prepared.client_id && String(s.session_date).slice(0, 16) === String(prepared.session_date).slice(0, 16)
+          );
+        } else if (entityType === 'tasks' && prepared.client_id && prepared.title) {
+          existingIdx = arr.findIndex(
+            (t) => t && t.client_id === prepared.client_id && t.title === prepared.title
+          );
+        }
+      }
+
+      if (existingIdx >= 0) {
+        arr[existingIdx] = { ...arr[existingIdx], ...prepared };
+      } else {
+        if (!prepared.id) prepared.id = generateUUID();
+        arr.push(prepared);
+      }
+      counts[entityType] = (counts[entityType] || 0) + 1;
     });
 
     this.saveState();
-    return { success: true, importedCounts: counts };
+    return {
+      success: true,
+      importedCounts: counts,
+      updatedClientsCount,
+      newClientsCount,
+      skippedClientsCount,
+    };
   }
 
   // ACTIVITY LOGS
