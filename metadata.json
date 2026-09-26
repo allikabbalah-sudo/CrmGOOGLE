@@ -1,0 +1,6 @@
+{
+  "name": "Kabbalah CRM",
+  "description": "מערכת CRM מתקדמת לניהול קליניקה טיפולית קבלית/אנרגטית",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

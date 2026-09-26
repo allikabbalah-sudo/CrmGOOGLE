@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile metadata",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "fullName": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "email"]
+    },
+    "UserAppData": {
+      "title": "UserAppData",
+      "description": "Real-time synchronized CRM user data profile including clients, sessions, programs, tasks, and organization details",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "activeOrgId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Individual user document containing user metadata"
+    },
+    "/users/{userId}/appData/state": {
+      "schema": "UserAppData",
+      "description": "Real-time synchronized state document containing complete CRM data profile for the user"
+    }
+  }
+}
