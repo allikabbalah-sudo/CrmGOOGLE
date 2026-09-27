@@ -71,7 +71,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ currentPath, onNavigate 
       </div>
 
       {/* Footer Profile Box */}
-      <div className="p-4 border-t border-white/5">
+      <div className="p-4 border-t border-white/5 space-y-3">
         <div className="flex items-center gap-3 bg-white/5 p-3 rounded-lg border border-white/5">
           {profile?.avatar_url ? (
             <img
@@ -88,6 +88,22 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ currentPath, onNavigate 
             <p className="text-xs font-semibold text-white truncate">{profile?.full_name || 'ישראל ישראלי'}</p>
             <p className="text-[10px] text-slate-500 truncate">מטפל בכיר</p>
           </div>
+        </div>
+
+        <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 pt-1 border-t border-white/5">
+          <button
+            onClick={() => onNavigate('/')}
+            className="hover:text-white transition-colors"
+          >
+            crmkabbalah
+          </button>
+          <span>•</span>
+          <button
+            onClick={() => onNavigate('/privacy')}
+            className="hover:text-white transition-colors"
+          >
+            מדיניות פרטיות
+          </button>
         </div>
       </div>
     </aside>

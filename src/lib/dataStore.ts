@@ -1526,6 +1526,20 @@ class DataStore {
     });
   }
 
+  public addSession(sessionData: Omit<Session, 'id' | 'created_at' | 'organization_id'>): Session {
+    const newSession: Session = {
+      ...sessionData,
+      id: generateUUID(),
+      organization_id: this.state.activeOrgId,
+      audio_urls: sessionData.audio_urls || [],
+      image_urls: sessionData.image_urls || [],
+      created_at: new Date().toISOString(),
+    };
+    this.state.sessions.push(newSession);
+    this.saveState();
+    return newSession;
+  }
+
   public updateSession(sessionId: string, updates: Partial<Session>): Session | undefined {
     const idx = this.state.sessions.findIndex((s) => s.id === sessionId);
     if (idx === -1) return undefined;

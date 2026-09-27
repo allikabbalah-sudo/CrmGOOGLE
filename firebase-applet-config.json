@@ -1,12 +1,12 @@
 {
   "projectId": "allicrm",
+  "appId": "1:30726969736:web:476e0598be4eb1189c823d",
   "apiKey": "AIzaSyB6LHEgfLn0Hbwqp5lwbzV5lZD4SOm0GPk",
   "authDomain": "allicrm.firebaseapp.com",
-  "appId": "1:30726969736:web:476e0598be4eb1189c823d",
   "firestoreDatabaseId": "crmgoogle",
   "storageBucket": "allicrm.firebasestorage.app",
   "messagingSenderId": "30726969736",
   "measurementId": "",
-  "oAuthClientId": "1001093019662-0vukods5ga5kjha1729kc40bnelevem8.apps.googleusercontent.com",
+  "oAuthClientId": "30726969736-b2tsqe172itml2i4o86duu22eiakrg5r.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

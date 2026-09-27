@@ -16,14 +16,16 @@ import { MediaGalleryView } from './views/MediaGalleryView';
 import { ShareReceiveView } from './views/ShareReceiveView';
 import { AuthView } from './views/AuthView';
 import { InviteView } from './views/InviteView';
+import { LandingView } from './views/LandingView';
+import { PrivacyView } from './views/PrivacyView';
 
 function MainApp() {
   const { user, isLoading } = useAuth();
-  const [currentPath, setCurrentPath] = useState<string>(window.location.pathname || '/dashboard');
+  const [currentPath, setCurrentPath] = useState<string>(window.location.pathname || '/');
 
   useEffect(() => {
     const onPopState = () => {
-      setCurrentPath(window.location.pathname || '/dashboard');
+      setCurrentPath(window.location.pathname || '/');
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -46,13 +48,50 @@ function MainApp() {
     );
   }
 
-  // If not logged in, show AuthView (or InviteView if token provided)
+  // 1. Completely Public Routes (do not require login)
+  if (currentPath === '/') {
+    return <LandingView onNavigate={navigate} />;
+  }
+
+  if (currentPath === '/privacy') {
+    return <PrivacyView onNavigate={navigate} />;
+  }
+
+  if (currentPath.startsWith('/invite/')) {
+    const token = currentPath.replace('/invite/', '');
+    return (
+      <div className="min-h-screen bg-background text-foreground dir-rtl font-heebo">
+        <InviteView token={token} onNavigate={navigate} />
+      </div>
+    );
+  }
+
+  // 2. Auth Route
+  if (currentPath === '/auth') {
+    if (user) {
+      // If already logged in, redirect to dashboard
+      return (
+        <AppLayout currentPath="/dashboard" onNavigate={navigate}>
+          <DashboardView onNavigate={navigate} />
+        </AppLayout>
+      );
+    }
+    return (
+      <div className="min-h-screen bg-background text-foreground dir-rtl font-heebo">
+        <AuthView onNavigate={navigate} />
+      </div>
+    );
+  }
+
+  // 3. Protected Routes - If not logged in, prompt AuthView
   if (!user) {
-    if (currentPath.startsWith('/invite/')) {
-      const token = currentPath.replace('/invite/', '');
+    if (currentPath.startsWith('/share-receive')) {
       return (
         <div className="min-h-screen bg-background text-foreground dir-rtl font-heebo">
-          <InviteView token={token} onNavigate={navigate} />
+          <div className="p-3 bg-teal-600 text-white text-center text-xs font-bold shadow-xs">
+            📱 התקבל קובץ משיתוף חיצוני (WhatsApp / טלפון). אנא התחבר כדי לשייכו ללקוח.
+          </div>
+          <AuthView onNavigate={(p) => navigate(p === '/dashboard' ? '/share-receive' : p)} />
         </div>
       );
     }
@@ -63,9 +102,9 @@ function MainApp() {
     );
   }
 
-  // Route matching
+  // Route matching for logged-in users inside AppLayout
   const renderView = () => {
-    if (currentPath === '/' || currentPath === '/dashboard') {
+    if (currentPath === '/dashboard') {
       return <DashboardView onNavigate={navigate} />;
     }
     if (currentPath === '/clients') {
@@ -96,26 +135,10 @@ function MainApp() {
     if (currentPath === '/share-receive') {
       return <ShareReceiveView onNavigate={navigate} />;
     }
-    if (currentPath === '/auth') {
-      return <AuthView onNavigate={navigate} />;
-    }
-    if (currentPath.startsWith('/invite/')) {
-      const token = currentPath.replace('/invite/', '');
-      return <InviteView token={token} onNavigate={navigate} />;
-    }
 
-    // Default fallback
+    // Default fallback for logged-in user
     return <DashboardView onNavigate={navigate} />;
   };
-
-  // For Auth or Invite routes, render standalone without full sidebar
-  if (currentPath === '/auth' || currentPath.startsWith('/invite/')) {
-    return (
-      <div className="min-h-screen bg-background text-foreground dir-rtl font-heebo">
-        {renderView()}
-      </div>
-    );
-  }
 
   return (
     <AppLayout currentPath={currentPath} onNavigate={navigate}>

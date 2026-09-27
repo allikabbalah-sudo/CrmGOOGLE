@@ -310,6 +310,28 @@ export const SettingsView: React.FC = () => {
             {pushEnabled ? '✓ התראות Push מופעלות' : 'הפעל התראות Push כעת'}
           </button>
         </div>
+
+        {/* Privacy Policy & Terms Card */}
+        <div className="bg-card border border-border rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="flex items-center gap-2 text-teal-600 dark:text-teal-400 font-bold text-sm">
+            <Shield className="w-5 h-5" />
+            מדיניות פרטיות ואבטחה
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            עיין במסמך מדיניות הפרטיות הרשמי של crmkabbalah, הכולל את תנאי השימוש בהרשאות Google Calendar ואבטחת נתוני המטופלים.
+          </p>
+          <a
+            href="/privacy"
+            onClick={(e) => {
+              e.preventDefault();
+              window.history.pushState({}, '', '/privacy');
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }}
+            className="w-full py-2 bg-teal-500/10 hover:bg-teal-500/20 text-teal-700 dark:text-teal-300 text-xs font-bold rounded-xl border border-teal-500/20 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            צפייה במדיניות הפרטיות (Privacy Policy)
+          </a>
+        </div>
       </div>
 
       {/* Pending Approvals (Admin Only) */}

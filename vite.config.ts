@@ -45,8 +45,41 @@ export default defineConfig(() => {
               purpose: 'maskable',
             },
           ],
+          share_target: {
+            action: '/share-receive',
+            method: 'POST',
+            enctype: 'multipart/form-data',
+            params: {
+              title: 'title',
+              text: 'text',
+              url: 'url',
+              files: [
+                {
+                  name: 'files',
+                  accept: [
+                    'image/*',
+                    'audio/*',
+                    'video/*',
+                    'application/pdf',
+                    '.mp3',
+                    '.wav',
+                    '.m4a',
+                    '.ogg',
+                    '.aac',
+                    '.opus',
+                    '.png',
+                    '.jpg',
+                    '.jpeg',
+                    '.webp',
+                    '.pdf',
+                  ],
+                },
+              ],
+            },
+          },
         },
         workbox: {
+          importScripts: ['/sw-share-target.js'],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [
             {
