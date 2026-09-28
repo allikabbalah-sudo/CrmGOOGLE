@@ -258,7 +258,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
   }
 
   // Selected Day Items
-  const daySessions = activeSessions.filter((s) => isSameDay(parseISO(s.session_date), selectedDay));
+  const daySessions = activeSessions
+    .filter((s) => isSameDay(parseISO(s.session_date), selectedDay))
+    .sort((a, b) => new Date(a.session_date).getTime() - new Date(b.session_date).getTime());
   const dayTasks = activeTasks.filter((t) => t.due_date && isSameDay(parseISO(t.due_date), selectedDay));
   const dayGcalEvents = gcalEvents.filter((ev) => {
     if (!ev.start.dateTime && !ev.start.date) return false;

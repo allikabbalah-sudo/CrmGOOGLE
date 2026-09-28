@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Users,
   Search,
@@ -10,11 +10,16 @@ import {
   MessageCircle,
   BookOpen,
   ChevronLeft,
+  Download,
+  Camera,
+  Edit,
 } from 'lucide-react';
 import { dataStore } from '../lib/dataStore';
 import { Client, ClientStatus, CLIENT_STATUS_LABELS } from '../types';
 import { formatHebrewDate, toWhatsAppUrl } from '../lib/utils';
 import { ClientModal } from '../components/dialogs/ClientModal';
+import { ExportClientsModal } from '../components/dialogs/ExportClientsModal';
+import { compressImageFile } from '../lib/indexedDbStorage';
 
 interface ClientsViewProps {
   onNavigate: (path: string) => void;
@@ -24,8 +29,36 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [clientToEdit, setClientToEdit] = useState<Client | null>(null);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingClientId, setUploadingClientId] = useState<string | null>(null);
 
   const clients = dataStore.getClients() || [];
+
+  const handleCardAvatarClick = (clientId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setUploadingClientId(clientId);
+    if (avatarInputRef.current) {
+      avatarInputRef.current.value = '';
+      avatarInputRef.current.click();
+    }
+  };
+
+  const handleCardAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingClientId) return;
+    try {
+      const compressed = await compressImageFile(file, 400, 400, 0.85);
+      if (compressed) {
+        dataStore.updateClient(uploadingClientId, { avatar_url: compressed });
+      }
+    } catch (err) {
+      console.error('Failed to update avatar from card:', err);
+    } finally {
+      setUploadingClientId(null);
+    }
+  };
 
   const filteredClients = clients.filter((c) => {
     if (!c) return false;
@@ -77,13 +110,24 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="w-full sm:w-auto px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
-        >
-          <Plus className="w-4 h-4" />
-          לקוח جديد לקליניקה
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <button
+            onClick={() => setIsExportModalOpen(true)}
+            className="flex-1 sm:flex-initial px-3.5 py-2 bg-card hover:bg-muted text-foreground border border-border text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5"
+            title="ייצוא רשימת לקוחות כקובץ JSON מובנה"
+          >
+            <Download className="w-4 h-4 text-teal-600" />
+            <span>ייצוא לקוחות (JSON)</span>
+          </button>
+
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex-1 sm:flex-initial px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+          >
+            <Plus className="w-4 h-4" />
+            <span>לקוח חדש לקליניקה</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters & Search */}
@@ -160,17 +204,27 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
                   {/* Card Header */}
                   <div className="flex items-start justify-between gap-2 mb-3">
                     <div className="flex items-center gap-3">
-                      {client.avatar_url ? (
-                        <img
-                          src={client.avatar_url}
-                          alt={client.full_name}
-                          className="w-10 h-10 rounded-full object-cover border border-primary/30"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-primary/15 text-primary font-bold text-sm flex items-center justify-center border border-primary/30">
-                          {client.full_name ? client.full_name.charAt(0) : 'ל'}
-                        </div>
-                      )}
+                      <div className="relative group/avatar shrink-0">
+                        {client.avatar_url ? (
+                          <img
+                            src={client.avatar_url}
+                            alt={client.full_name}
+                            className="w-10 h-10 rounded-full object-cover border border-primary/30"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-primary/15 text-primary font-bold text-sm flex items-center justify-center border border-primary/30">
+                            {client.full_name ? client.full_name.charAt(0) : 'ל'}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => handleCardAvatarClick(client.id, e)}
+                          title="החלף / העלה תמונה ללקוח"
+                          className="absolute inset-0 rounded-full bg-black/45 text-white opacity-0 group-hover/avatar:opacity-100 flex items-center justify-center transition-opacity shadow-xs"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                       <div>
                         <h3 className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">
                           {client.full_name}
@@ -195,6 +249,24 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
                       <span className="truncate">{client.selected_reading}</span>
                     </div>
                   )}
+
+                  {/* Latest session */}
+                  {(() => {
+                    const clientSessions = dataStore.getSessions(client.id);
+                    const latestSession = clientSessions[0];
+                    if (!latestSession) return null;
+                    return (
+                      <div className="mb-3 px-2.5 py-1.5 bg-muted/40 rounded-xl text-xs flex items-center justify-between border border-border/60">
+                        <div className="flex items-center gap-1.5 text-muted-foreground text-[11px]">
+                          <Calendar className="w-3 h-3 text-primary shrink-0" />
+                          <span>מפגש עדכני:</span>
+                        </div>
+                        <span className="font-mono text-[11px] font-bold text-foreground">
+                          {formatHebrewDate(latestSession.session_date, 'dd/MM/yyyy')}
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Contact Details */}
                   <div className="space-y-1.5 text-xs text-muted-foreground mb-4">
@@ -225,7 +297,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
 
                 {/* Footer Quick Actions */}
                 <div className="pt-3 border-t border-border/60 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <a
                       href={whatsappUrl}
                       target="_blank"
@@ -237,6 +309,18 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
                       <MessageCircle className="w-3.5 h-3.5" />
                       <span className="text-[11px]">WhatsApp</span>
                     </a>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setClientToEdit(client);
+                      }}
+                      className="p-1.5 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground rounded-lg font-semibold flex items-center gap-1 transition-colors border border-border/50"
+                      title="עריכת פרטי לקוח ותמונה"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      <span className="text-[11px]">ערוך</span>
+                    </button>
                   </div>
 
                   <span className="text-[11px] font-bold text-primary flex items-center gap-0.5 group-hover:translate-x-[-2px] transition-transform">
@@ -249,11 +333,42 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Hidden file input for direct card avatar uploads */}
+      <input
+        ref={avatarInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleCardAvatarFileChange}
+        className="hidden"
+      />
+
+      {/* Add Client Modal */}
       <ClientModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSave={handleCreateClient}
+      />
+
+      {/* Edit Client Modal */}
+      {clientToEdit && (
+        <ClientModal
+          isOpen={true}
+          clientToEdit={clientToEdit}
+          onClose={() => setClientToEdit(null)}
+          onSave={(data) => {
+            dataStore.updateClient(clientToEdit.id, data);
+            setClientToEdit(null);
+          }}
+        />
+      )}
+
+      {/* Export Clients JSON Modal */}
+      <ExportClientsModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        allClients={clients}
+        filteredClients={filteredClients}
+        isFiltered={searchTerm.trim() !== '' || statusFilter !== 'all'}
       />
     </div>
   );

@@ -31,6 +31,7 @@ import {
 } from '../lib/googleCalendar';
 import JSZip from 'jszip';
 import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
+import { ExportClientsModal } from '../components/dialogs/ExportClientsModal';
 
 export const SettingsView: React.FC = () => {
   const { currentOrg, members, pendingApprovals, reloadOrg } = useOrganization();
@@ -38,6 +39,7 @@ export const SettingsView: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [isExportClientsModalOpen, setIsExportClientsModalOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
@@ -436,15 +438,37 @@ export const SettingsView: React.FC = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Export */}
-          <div className="p-4 bg-muted/30 border border-border rounded-xl space-y-2">
-            <h4 className="font-bold text-xs">יצוא גיבוי מלא</h4>
-            <p className="text-[11px] text-muted-foreground">יוצר קובץ ZIP הכולל את כל סכימת ה-DB והמדיה.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Custom Clients JSON Export */}
+          <div className="p-4 bg-muted/40 border border-teal-500/30 rounded-xl space-y-2 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-1.5 text-teal-700 dark:text-teal-300 font-bold text-xs mb-1">
+                <Users className="w-4 h-4 text-teal-600" />
+                <span>ייצוא לקוחות (JSON מובנה)</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                ייצוא נתוני לקוחות בפורמט JSON עם firstName, lastName, status, userId וכל פרטי הלקוח.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsExportClientsModalOpen(true)}
+              className="w-full py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all mt-2"
+            >
+              <Download className="w-4 h-4" />
+              <span>פתח חלון ייצוא לקוחות</span>
+            </button>
+          </div>
+
+          {/* Full ZIP Export */}
+          <div className="p-4 bg-muted/30 border border-border rounded-xl space-y-2 flex flex-col justify-between">
+            <div>
+              <h4 className="font-bold text-xs">יצוא גיבוי מלא (ZIP)</h4>
+              <p className="text-[11px] text-muted-foreground">יוצר קובץ ZIP הכולל את כל סכימת ה-DB והמדיה.</p>
+            </div>
             <button
               onClick={handleExportDataZip}
               disabled={isExporting}
-              className="w-full py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-xs hover:bg-primary/90 flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+              className="w-full py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-xs hover:bg-primary/90 flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 mt-2"
             >
               <Download className="w-4 h-4" />
               {isExporting ? 'מייצא גיבוי...' : 'הורד קובץ גיבוי ZIP'}
@@ -452,10 +476,12 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {/* Import */}
-          <div className="p-4 bg-muted/30 border border-border rounded-xl space-y-2">
-            <h4 className="font-bold text-xs">טעינת גיבוי קיים</h4>
-            <p className="text-[11px] text-muted-foreground">טען קובץ ZIP קודם לשחזור נתוני הקליניקה.</p>
-            <label className="w-full py-2 bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs hover:bg-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-all">
+          <div className="p-4 bg-muted/30 border border-border rounded-xl space-y-2 flex flex-col justify-between">
+            <div>
+              <h4 className="font-bold text-xs">טעינת גיבוי קיים</h4>
+              <p className="text-[11px] text-muted-foreground">טען קובץ ZIP קודם לשחזור נתוני הקליניקה.</p>
+            </div>
+            <label className="w-full py-2 bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs hover:bg-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-all mt-2">
               <Upload className="w-4 h-4" />
               {isImporting ? `טוען... ${importProgress}%` : 'בחר קובץ ZIP לטעינה'}
               <input type="file" accept=".zip" onChange={handleImportDataZip} className="hidden" />
@@ -466,6 +492,13 @@ export const SettingsView: React.FC = () => {
 
       {/* Invite Modal */}
       <InviteModal isOpen={isInviteModalOpen} onClose={() => setIsInviteModalOpen(false)} />
+
+      {/* Export Clients Modal */}
+      <ExportClientsModal
+        isOpen={isExportClientsModalOpen}
+        onClose={() => setIsExportClientsModalOpen(false)}
+        allClients={dataStore.getClients()}
+      />
     </div>
   );
 };

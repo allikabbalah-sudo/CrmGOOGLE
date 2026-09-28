@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Share2,
   FileAudio,
@@ -15,6 +15,9 @@ import {
   Search,
   ExternalLink,
   Volume2,
+  RefreshCw,
+  Clipboard,
+  Trash2,
 } from 'lucide-react';
 import { dataStore } from '../lib/dataStore';
 import { formatFileSize, generateUUID } from '../lib/utils';
@@ -24,7 +27,7 @@ interface ShareReceiveViewProps {
   onNavigate: (path: string) => void;
 }
 
-interface ReceivedFileItem {
+export interface ReceivedFileItem {
   id: string;
   name: string;
   size: number;
@@ -32,6 +35,75 @@ interface ReceivedFileItem {
   url: string;
   file?: File;
   dataUrl?: string;
+  isWhatsApp?: boolean;
+}
+
+// Magic bytes inspector for WhatsApp typeless blobs
+async function detectCategoryAndMime(blob: Blob, rawName: string, rawMime: string) {
+  let mime = (rawMime || '').toLowerCase();
+  const name = (rawName || '').toLowerCase();
+
+  if (
+    mime.startsWith('audio/') ||
+    mime.includes('opus') ||
+    mime.includes('ogg') ||
+    name.match(/\.(opus|ogg|m4a|mp3|wav|aac|amr|3gp)$/i)
+  ) {
+    return { cat: 'audio' as const, mime: mime || 'audio/ogg' };
+  }
+  if (
+    mime.startsWith('image/') ||
+    name.match(/\.(png|jpg|jpeg|webp|gif|svg|bmp)$/i)
+  ) {
+    return { cat: 'image' as const, mime: mime || 'image/jpeg' };
+  }
+  if (mime.startsWith('video/') || name.match(/\.(mp4|webm|mov)$/i)) {
+    return { cat: 'video' as const, mime: mime || 'video/mp4' };
+  }
+
+  // Magic bytes inspection
+  try {
+    const slice = await blob.slice(0, 16).arrayBuffer();
+    const bytes = new Uint8Array(slice);
+    if (bytes.length >= 4) {
+      // Ogg / Opus voice note: "OggS" (0x4F, 0x67, 0x67, 0x53)
+      if (bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) {
+        return { cat: 'audio' as const, mime: 'audio/ogg' };
+      }
+      // JPEG: 0xFF, 0xD8, 0xFF
+      if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+        return { cat: 'image' as const, mime: 'image/jpeg' };
+      }
+      // PNG: 0x89, 0x50, 0x4E, 0x47
+      if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+        return { cat: 'image' as const, mime: 'image/png' };
+      }
+      // WebP: RIFF ... WEBP
+      if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+        return { cat: 'image' as const, mime: 'image/webp' };
+      }
+      // MP4 / M4A: "ftyp" at offset 4
+      if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+        return { cat: 'audio' as const, mime: 'audio/mp4' };
+      }
+      // AMR: "#!AMR"
+      if (bytes[0] === 0x23 && bytes[1] === 0x21 && bytes[2] === 0x41 && bytes[3] === 0x4d) {
+        return { cat: 'audio' as const, mime: 'audio/amr' };
+      }
+      // MP3: "ID3"
+      if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) {
+        return { cat: 'audio' as const, mime: 'audio/mpeg' };
+      }
+      // PDF: "%PDF"
+      if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+        return { cat: 'document' as const, mime: 'application/pdf' };
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return { cat: 'document' as const, mime: mime || 'application/octet-stream' };
 }
 
 export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }) => {
@@ -40,6 +112,8 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
   const [sharedTitle, setSharedTitle] = useState('');
   const [sharedUrl, setSharedUrl] = useState('');
   const [isLoadingShared, setIsLoadingShared] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Client Selection & Target
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -65,136 +139,31 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
     );
   }, [clients, clientSearch]);
 
-  // Read shared target files and text from Service Worker Cache & URL Params
-  useEffect(() => {
-    let isMounted = true;
-
-    const readSharedData = async () => {
-      setIsLoadingShared(true);
-
-      // 1. Check URL parameters (for GET text/link shares or ?shared=1 redirect)
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlTitle = urlParams.get('title') || '';
-      const urlText = urlParams.get('text') || '';
-      const urlShare = urlParams.get('url') || '';
-
-      if (urlTitle) setSharedTitle(urlTitle);
-      if (urlText) setSharedText(urlText);
-      if (urlShare) setSharedUrl(urlShare);
-
-      const items: ReceivedFileItem[] = [];
-
-      // 2. Check Service Worker Cache (where sw-share-target.js stores files from POST)
-      if (typeof caches !== 'undefined') {
-        try {
-          const cacheExists = await caches.has('pwa-shared-cache');
-          if (cacheExists) {
-            const cache = await caches.open('pwa-shared-cache');
-
-            // Read metadata
-            const metaRes = await cache.match('/pwa-shared-meta.json');
-            let filesCount = 0;
-            if (metaRes) {
-              try {
-                const meta = await metaRes.json();
-                if (meta.title && !urlTitle) setSharedTitle(meta.title);
-                if (meta.text && !urlText) setSharedText(meta.text);
-                if (meta.url && !urlShare) setSharedUrl(meta.url);
-                filesCount = meta.filesCount || 0;
-              } catch (e) {
-                console.warn('Error parsing share metadata:', e);
-              }
-              await cache.delete('/pwa-shared-meta.json');
-            }
-
-            // Read files (up to filesCount or search available cached files)
-            const countToSearch = Math.max(filesCount, 10);
-            for (let i = 0; i < countToSearch; i++) {
-              const fileKey = `/pwa-shared-file-${i}`;
-              const fileRes = await cache.match(fileKey);
-              if (fileRes) {
-                const rawName = fileRes.headers.get('x-file-name') || `shared_file_${i}`;
-                const name = decodeURIComponent(rawName);
-                const mimeType = fileRes.headers.get('x-file-type') || fileRes.headers.get('content-type') || '';
-                const blob = await fileRes.blob();
-
-                // Determine file category
-                let cat: ReceivedFileItem['type'] = 'document';
-                if (mimeType.startsWith('audio/') || name.match(/\.(mp3|wav|m4a|ogg|aac|opus)$/i)) {
-                  cat = 'audio';
-                } else if (mimeType.startsWith('image/') || name.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i)) {
-                  cat = 'image';
-                } else if (mimeType.startsWith('video/') || name.match(/\.(mp4|webm|mov)$/i)) {
-                  cat = 'video';
-                }
-
-                const fileObj = new File([blob], name, { type: mimeType });
-                const blobUrl = URL.createObjectURL(fileObj);
-
-                // Convert blob to DataURL for persistence
-                const dataUrl = await new Promise<string>((resolve) => {
-                  const reader = new FileReader();
-                  reader.onload = () => resolve(reader.result as string);
-                  reader.onerror = () => resolve(blobUrl);
-                  reader.readAsDataURL(blob);
-                });
-
-                items.push({
-                  id: generateUUID(),
-                  name,
-                  size: blob.size,
-                  type: cat,
-                  url: blobUrl,
-                  file: fileObj,
-                  dataUrl,
-                });
-
-                // Clear from cache so it's not reread on refresh
-                await cache.delete(fileKey);
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('Error reading from pwa-shared-cache:', err);
-        }
-      }
-
-      if (isMounted) {
-        if (items.length > 0) {
-          setReceivedFiles(items);
-          if (items.some((it) => it.type === 'audio')) {
-            setTargetType('session'); // Default audio voice notes to session recording
-          }
-        }
-        setIsLoadingShared(false);
-      }
-    };
-
-    readSharedData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Manual File Upload handler (to test without native intent)
-  const handleManualFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
+  // Helper to ingest an array of File or Blob objects
+  const processIncomingFiles = useCallback(async (files: (File | Blob)[], originName?: string) => {
     const newItems: ReceivedFileItem[] = [];
+
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
-      let cat: ReceivedFileItem['type'] = 'document';
-      if (f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|ogg|aac|opus)$/i)) {
-        cat = 'audio';
-      } else if (f.type.startsWith('image/') || f.name.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i)) {
-        cat = 'image';
-      } else if (f.type.startsWith('video/')) {
-        cat = 'video';
+      const rawName = (f as File).name || originName || `whatsapp_file_${Date.now()}_${i}`;
+      const rawType = f.type || '';
+
+      const { cat, mime } = await detectCategoryAndMime(f, rawName, rawType);
+      const isWA =
+        rawName.toLowerCase().includes('whatsapp') ||
+        rawName.toLowerCase().includes('ptt') ||
+        mime.includes('opus') ||
+        mime.includes('ogg');
+
+      let cleanName = rawName;
+      if (!cleanName || cleanName === 'blob' || !cleanName.includes('.')) {
+        const ext = cat === 'audio' ? 'opus' : cat === 'image' ? 'jpg' : 'bin';
+        cleanName = `whatsapp_${cat}_${Date.now()}_${i}.${ext}`;
       }
 
-      const blobUrl = URL.createObjectURL(f);
+      const fileObj = new File([f], cleanName, { type: mime });
+      const blobUrl = URL.createObjectURL(fileObj);
+
       const dataUrl = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
@@ -204,19 +173,290 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
 
       newItems.push({
         id: generateUUID(),
-        name: f.name,
+        name: cleanName,
         size: f.size,
         type: cat,
         url: blobUrl,
-        file: f,
+        file: fileObj,
         dataUrl,
+        isWhatsApp: isWA,
       });
     }
 
-    setReceivedFiles((prev) => [...prev, ...newItems]);
-    if (newItems.some((it) => it.type === 'audio')) {
-      setTargetType('session');
+    if (newItems.length > 0) {
+      setReceivedFiles((prev) => {
+        // avoid exact duplicates by size and name
+        const existingKeys = new Set(prev.map((it) => `${it.name}_${it.size}`));
+        const filtered = newItems.filter((it) => !existingKeys.has(`${it.name}_${it.size}`));
+        return [...prev, ...filtered];
+      });
+
+      if (newItems.some((it) => it.type === 'audio')) {
+        setTargetType('session'); // Auto-select session recording for voice notes
+      }
     }
+  }, []);
+
+  // Scan sources (Server, Cache Storage, URL) with polling retry
+  const scanAllSharedSources = useCallback(async () => {
+    const items: ReceivedFileItem[] = [];
+
+    // 1. URL search parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlTitle = urlParams.get('title') || '';
+    const urlText = urlParams.get('text') || '';
+    const urlShare = urlParams.get('url') || '';
+
+    if (urlTitle) setSharedTitle(urlTitle);
+    if (urlText) setSharedText(urlText);
+    if (urlShare) setSharedUrl(urlShare);
+
+    // 2. Server Shared Files endpoint
+    try {
+      const srvRes = await fetch('/api/server-shared-files');
+      if (srvRes.ok) {
+        const srvData = await srvRes.json();
+        if (srvData && Array.isArray(srvData.files) && srvData.files.length > 0) {
+          if (srvData.title && !urlTitle) setSharedTitle(srvData.title);
+          if (srvData.text && !urlText) setSharedText(srvData.text);
+          if (srvData.url && !urlShare) setSharedUrl(srvData.url);
+
+          for (const f of srvData.files) {
+            try {
+              const res = await fetch(f.dataUrl);
+              const blob = await res.blob();
+              const { cat, mime } = await detectCategoryAndMime(blob, f.name, f.type);
+              const fileObj = new File([blob], f.name || `whatsapp_${cat}_${Date.now()}`, { type: mime });
+              const blobUrl = URL.createObjectURL(fileObj);
+
+              items.push({
+                id: generateUUID(),
+                name: f.name || `whatsapp_${cat}_${Date.now()}`,
+                size: f.size || blob.size,
+                type: cat,
+                url: blobUrl,
+                file: fileObj,
+                dataUrl: f.dataUrl,
+                isWhatsApp: true,
+              });
+            } catch (err) {
+              console.warn('Error reading server shared blob:', err);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Server shared files check error:', e);
+    }
+
+    // 3. Service Worker Cache Storage
+    if (typeof caches !== 'undefined') {
+      try {
+        const cacheExists = await caches.has('pwa-shared-cache');
+        if (cacheExists) {
+          const cache = await caches.open('pwa-shared-cache');
+
+          // Read metadata
+          const metaRes = await cache.match('/pwa-shared-meta.json');
+          let filesCount = 0;
+          if (metaRes) {
+            try {
+              const meta = await metaRes.json();
+              if (meta.title && !urlTitle) setSharedTitle(meta.title);
+              if (meta.text && !urlText) setSharedText(meta.text);
+              if (meta.url && !urlShare) setSharedUrl(meta.url);
+              filesCount = meta.filesCount || 0;
+            } catch (e) {
+              console.warn('Error parsing share metadata:', e);
+            }
+          }
+
+          const countToSearch = Math.max(filesCount, 10);
+          for (let i = 0; i < countToSearch; i++) {
+            const fileKey = `/pwa-shared-file-${i}`;
+            const fileRes = await cache.match(fileKey);
+            if (fileRes) {
+              const rawName = fileRes.headers.get('x-file-name') || `whatsapp_file_${i}`;
+              const name = decodeURIComponent(rawName);
+              const rawMime = fileRes.headers.get('x-file-type') || fileRes.headers.get('content-type') || '';
+              const blob = await fileRes.blob();
+
+              const { cat, mime } = await detectCategoryAndMime(blob, name, rawMime);
+              const fileObj = new File([blob], name, { type: mime });
+              const blobUrl = URL.createObjectURL(fileObj);
+
+              const dataUrl = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = () => resolve(blobUrl);
+                reader.readAsDataURL(blob);
+              });
+
+              items.push({
+                id: generateUUID(),
+                name,
+                size: blob.size,
+                type: cat,
+                url: blobUrl,
+                file: fileObj,
+                dataUrl,
+                isWhatsApp: true,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error reading from pwa-shared-cache:', err);
+      }
+    }
+
+    return items;
+  }, []);
+
+  // Multi-attempt polling on mount
+  useEffect(() => {
+    let isCancelled = false;
+
+    const runPoll = async () => {
+      setIsLoadingShared(true);
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (isCancelled) return;
+        const found = await scanAllSharedSources();
+
+        if (found.length > 0) {
+          if (!isCancelled) {
+            setReceivedFiles(found);
+            if (found.some((it) => it.type === 'audio')) {
+              setTargetType('session');
+            }
+            setIsLoadingShared(false);
+          }
+          return;
+        }
+
+        // Wait before next attempt (300ms, 700ms, 1200ms)
+        const delay = attempt === 0 ? 300 : attempt === 1 ? 700 : 1200;
+        await new Promise((r) => setTimeout(r, delay));
+      }
+
+      if (!isCancelled) {
+        setIsLoadingShared(false);
+      }
+    };
+
+    runPoll();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [scanAllSharedSources]);
+
+  // Window Clipboard Paste Listener (Ctrl+V / Command+V anywhere on this view)
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items || items.length === 0) return;
+
+      const pastedFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          const f = item.getAsFile();
+          if (f) pastedFiles.push(f);
+        } else if (item.kind === 'string' && item.type === 'text/plain') {
+          item.getAsString((text) => {
+            if (text && !sharedText) {
+              setSharedText(text);
+            }
+          });
+        }
+      }
+
+      if (pastedFiles.length > 0) {
+        await processIncomingFiles(pastedFiles, `pasted_${Date.now()}`);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [sharedText, processIncomingFiles]);
+
+  // Manual refresh button handler
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const found = await scanAllSharedSources();
+      if (found.length > 0) {
+        setReceivedFiles(found);
+        if (found.some((it) => it.type === 'audio')) {
+          setTargetType('session');
+        }
+      }
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Clipboard Paste Button handler
+  const handleClipboardButtonPaste = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const items = await navigator.clipboard.read();
+        const files: File[] = [];
+        for (const item of items) {
+          for (const type of item.types) {
+            if (type.startsWith('image/') || type.startsWith('audio/')) {
+              const blob = await item.getType(type);
+              const ext = type.includes('png') ? 'png' : type.includes('jpeg') ? 'jpg' : 'bin';
+              files.push(new File([blob], `clipboard_${Date.now()}.${ext}`, { type }));
+            }
+          }
+        }
+        if (files.length > 0) {
+          await processIncomingFiles(files);
+          return;
+        }
+      }
+      // fallback to text
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) setSharedText(text);
+      }
+    } catch (err) {
+      console.warn('Clipboard read failed or permission denied:', err);
+    }
+  };
+
+  // Manual File Upload handler
+  const handleManualFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await processIncomingFiles(Array.from(files));
+    e.target.value = '';
+  };
+
+  // Drag and Drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragOver(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      await processIncomingFiles(Array.from(files));
+    }
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setReceivedFiles((prev) => prev.filter((it) => it.id !== id));
   };
 
   // Save received items into Client
@@ -226,16 +466,19 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
 
     setIsSaving(true);
     const client = dataStore.getClientById(selectedClientId);
-    if (!client) return;
+    if (!client) {
+      setIsSaving(false);
+      return;
+    }
 
     try {
-      // 1. If text/link was shared from WhatsApp:
+      // 1. Text or Link shared from WhatsApp
       if (sharedText || sharedUrl || sharedTitle) {
         const textToAppend = [
           sharedTitle ? `כותרת שיתוף: ${sharedTitle}` : '',
           sharedText ? sharedText : '',
           sharedUrl ? `קישור: ${sharedUrl}` : '',
-          `[התקבל משיתוף ב-${new Date().toLocaleDateString('he-IL')}]`,
+          `[התקבל מוואטסאפ ב-${new Date().toLocaleDateString('he-IL')}]`,
         ]
           .filter(Boolean)
           .join('\n');
@@ -245,7 +488,6 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
           notes: existingNotes ? `${existingNotes}\n\n---\n${textToAppend}` : textToAppend,
         });
 
-        // Also add activity log
         dataStore.logActivity(selectedClientId, 'shared_note_added', {
           title: sharedTitle || 'הודעה/טקסט משותף',
         });
@@ -271,7 +513,7 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
           url: dataToPersist,
         });
 
-        // If user chose to link to a specific session:
+        // If user chose to link to an existing session
         if (targetType === 'session' && selectedSessionId) {
           const currentSession = availableSessions.find((s) => s.id === selectedSessionId);
           const currentAudio = currentSession?.audio_urls || [];
@@ -294,7 +536,7 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
         });
       }
 
-      // If user opted to create a new session from shared audio recording
+      // 3. If user opted to create a NEW session from shared audio recording
       if (targetType === 'session' && !selectedSessionId && receivedFiles.some((f) => f.type === 'audio')) {
         const audioItem = receivedFiles.find((f) => f.type === 'audio');
         const audioUrl = audioItem?.dataUrl || audioItem?.url || '';
@@ -303,10 +545,24 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
           program_id: selectedProgramId || undefined,
           session_date: new Date().toISOString(),
           status: 'completed',
-          notes: `מפגש שנוצר מקובץ הקלטה קולית משותף (${audioItem?.name || ''})`,
+          notes: `מפגש שנוצר מהקלטת קול מוואטסאפ (${audioItem?.name || ''})`,
           audio_urls: audioUrl ? [audioUrl] : [],
           image_urls: [],
         });
+      }
+
+      // Clean up server buffer & service worker cache after successful save
+      fetch('/api/server-shared-files/clear', { method: 'POST' }).catch(() => {});
+      if (typeof caches !== 'undefined') {
+        try {
+          const cache = await caches.open('pwa-shared-cache');
+          await cache.delete('/pwa-shared-meta.json');
+          for (let i = 0; i < 20; i++) {
+            await cache.delete(`/pwa-shared-file-${i}`);
+          }
+        } catch {
+          // ignore
+        }
       }
 
       setSavedSuccessClientId(selectedClientId);
@@ -350,8 +606,18 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
     );
   }
 
+  const hasFiles = receivedFiles.length > 0;
+  const hasText = Boolean(sharedText || sharedTitle || sharedUrl);
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6 dir-rtl text-right">
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`max-w-2xl mx-auto space-y-6 dir-rtl text-right transition-colors rounded-3xl ${
+        isDragOver ? 'ring-4 ring-teal-500 bg-teal-500/5' : ''
+      }`}
+    >
       {/* Top Banner / Status */}
       <div className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between border-b border-border pb-4">
@@ -362,43 +628,58 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
             <div>
               <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-700 dark:text-teal-300 text-[10px] font-bold mb-1">
                 <Sparkles className="w-3 h-3" />
-                <span>קליטת שיתוף חיצוני (Share Target)</span>
+                <span>קליטת שיתוף WhatsApp / מכשיר</span>
               </div>
-              <h2 className="text-lg font-bold text-foreground">שיוך קובץ או הקלטה ללקוח</h2>
+              <h2 className="text-lg font-bold text-foreground">שיוך הקלטה או תמונה ללקוח</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                קליטת קובץ שמע, תמונה או הודעה שנשלחו מוואטסאפ או מכל אפליקציה במכשיר
+                קליטת הודעה קולית, תמונה או קובץ משיתוף וואטסאפ ישירות לתיק הלקוח
               </p>
             </div>
           </div>
-          <button
-            onClick={() => onNavigate('/dashboard')}
-            className="text-xs font-semibold text-muted-foreground hover:text-foreground p-1"
-          >
-            ביטול
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleManualRefresh}
+              disabled={isRefreshing || isLoadingShared}
+              className="p-2 border border-border rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted text-xs transition-colors flex items-center gap-1"
+              title="סרוק שוב קבצים שהתקבלו"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing || isLoadingShared ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline text-[11px] font-semibold">רענן סריקה</span>
+            </button>
+            <button
+              onClick={() => onNavigate('/dashboard')}
+              className="text-xs font-semibold text-muted-foreground hover:text-foreground p-1.5"
+            >
+              ביטול
+            </button>
+          </div>
         </div>
 
         {/* Loading state indicator */}
         {isLoadingShared && (
-          <div className="p-4 bg-muted/40 rounded-xl text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+          <div className="p-4 bg-teal-500/5 border border-teal-500/20 rounded-xl text-center text-xs text-teal-800 dark:text-teal-200 flex items-center justify-center gap-2">
             <div className="w-4 h-4 border-2 border-teal-600 border-t-transparent rounded-full animate-spin" />
-            <span>סורק קבצים שהתקבלו מהמכשיר...</span>
+            <span>סורק ומזהה קבצים שהתקבלו מוואטסאפ או מהמכשיר...</span>
           </div>
         )}
 
         {/* Display Received Shared Files Preview */}
-        {receivedFiles.length > 0 ? (
+        {hasFiles && (
           <div className="space-y-3">
             <div className="text-xs font-bold text-foreground flex items-center justify-between">
-              <span>קבצים שנקלטו ({receivedFiles.length}):</span>
-              <span className="text-[11px] text-teal-600 font-semibold">מוכנים לשיוך</span>
+              <span className="flex items-center gap-2">
+                <span>קבצים שזוהו בהצלחה ({receivedFiles.length}):</span>
+                <span className="px-2 py-0.5 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold rounded-full border border-emerald-500/30">
+                  מוכנים לשיוך
+                </span>
+              </span>
             </div>
 
             <div className="space-y-3">
-              {receivedFiles.map((fileItem, idx) => (
+              {receivedFiles.map((fileItem) => (
                 <div
-                  key={fileItem.id || idx}
-                  className="p-4 bg-muted/30 border border-border rounded-xl space-y-3"
+                  key={fileItem.id}
+                  className="p-4 bg-muted/30 border border-border rounded-xl space-y-3 relative group"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
@@ -409,22 +690,38 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
                         {fileItem.type === 'document' && <FileText className="w-6 h-6 text-amber-600" />}
                       </div>
                       <div className="min-w-0">
-                        <h4 className="font-bold text-xs sm:text-sm text-foreground truncate">
-                          {fileItem.name}
-                        </h4>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-bold text-xs sm:text-sm text-foreground truncate">
+                            {fileItem.name}
+                          </h4>
+                          {fileItem.isWhatsApp && (
+                            <span className="px-2 py-0.5 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold rounded-md border border-emerald-500/30 flex items-center gap-1">
+                              <span>WhatsApp</span>
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[11px] text-muted-foreground mt-0.5">
-                          {formatFileSize(fileItem.size)} • {fileItem.type.toUpperCase()}
+                          {formatFileSize(fileItem.size)} • {fileItem.type === 'audio' ? 'הקלטת קול' : fileItem.type === 'image' ? 'תמונה' : fileItem.type.toUpperCase()}
                         </p>
                       </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveItem(fileItem.id)}
+                      className="p-1.5 text-muted-foreground hover:text-rose-600 rounded-lg hover:bg-rose-500/10 transition-colors"
+                      title="הסר קובץ זה"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
 
                   {/* Audio Player Preview */}
                   {fileItem.type === 'audio' && (
                     <div className="pt-2 border-t border-border/60">
                       <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground mb-1.5">
-                        <Volume2 className="w-3.5 h-3.5 text-teal-600" />
-                        <span>האזנה להקלטה שהתקבלה:</span>
+                        <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>נגן הקלטה קולית מוואטסאפ:</span>
                       </div>
                       <audio controls className="w-full h-10 rounded-lg" src={fileItem.url} />
                     </div>
@@ -444,10 +741,10 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
               ))}
             </div>
           </div>
-        ) : null}
+        )}
 
-        {/* Display Received Text or Link (e.g. from WhatsApp text share) */}
-        {(sharedText || sharedTitle || sharedUrl) && (
+        {/* Display Received Text or Link */}
+        {hasText && (
           <div className="p-4 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 rounded-xl space-y-2">
             <div className="flex items-center gap-2 text-xs font-bold text-teal-900 dark:text-teal-200">
               <MessageSquare className="w-4 h-4 text-teal-600" />
@@ -470,10 +767,12 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
           </div>
         )}
 
-        {/* Empty state / Manual Test Picker if opened directly */}
-        {receivedFiles.length === 0 && !sharedText && !isLoadingShared && (
+        {/* Empty state / Manual Controls */}
+        {!hasFiles && !hasText && !isLoadingShared && (
           <div className="p-6 border-2 border-dashed border-border rounded-xl text-center space-y-3 bg-muted/20">
-            <Upload className="w-8 h-8 text-muted-foreground mx-auto" />
+            <div className="w-12 h-12 bg-teal-500/10 text-teal-600 rounded-full flex items-center justify-center mx-auto">
+              <Upload className="w-6 h-6" />
+            </div>
             <div className="space-y-1">
               <h3 className="text-xs sm:text-sm font-bold text-foreground">
                 לא זוהה קובץ משיתוף פעיל
@@ -482,19 +781,54 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
                 בטלפון: היכנס לוואטסאפ, לחץ על שיתוף (Share) בהקלטה או תמונה, ובחר ב-<strong>Kabbalah CRM</strong>.
               </p>
             </div>
-            <div className="pt-2">
-              <label className="inline-flex items-center gap-2 px-4 py-2 bg-card hover:bg-muted text-foreground border border-border rounded-xl text-xs font-bold cursor-pointer transition-colors">
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={handleClipboardButtonPaste}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 rounded-xl text-xs font-bold transition-colors"
+              >
+                <Clipboard className="w-4 h-4" />
+                <span>הדבק מהלוח (Ctrl+V)</span>
+              </button>
+
+              <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-card hover:bg-muted text-foreground border border-border rounded-xl text-xs font-bold cursor-pointer transition-colors">
                 <Upload className="w-4 h-4 text-teal-600" />
-                <span>בחר קובץ לבדיקה ידנית מהמחשב</span>
+                <span>בחר קובץ מהמכשיר</span>
                 <input
                   type="file"
                   multiple
-                  accept="audio/*,image/*,video/*,application/pdf"
+                  accept="*/*,audio/*,image/*,video/*,application/pdf"
                   onChange={handleManualFileInput}
                   className="hidden"
                 />
               </label>
             </div>
+          </div>
+        )}
+
+        {/* Additional files button if files are already received */}
+        {hasFiles && (
+          <div className="pt-2 flex items-center justify-end gap-2 text-xs">
+            <button
+              type="button"
+              onClick={handleClipboardButtonPaste}
+              className="text-primary hover:underline font-semibold flex items-center gap-1"
+            >
+              <Clipboard className="w-3.5 h-3.5" />
+              <span>הדבק עוד מהלוח</span>
+            </button>
+            <span className="text-border">|</span>
+            <label className="text-teal-600 hover:underline font-semibold cursor-pointer flex items-center gap-1">
+              <Upload className="w-3.5 h-3.5" />
+              <span>הוסף עוד קובץ</span>
+              <input
+                type="file"
+                multiple
+                accept="*/*,audio/*,image/*,video/*,application/pdf"
+                onChange={handleManualFileInput}
+                className="hidden"
+              />
+            </label>
           </div>
         )}
 
@@ -600,7 +934,7 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
                     <option value="">+ צור מפגש חדש עם הקלטה זו כעת</option>
                     {availableSessions.map((s, idx) => (
                       <option key={s.id} value={s.id}>
-                        מפגש #{idx + 1} • {new Date(s.session_date).toLocaleDateString('he-IL')} • {s.status}
+                        {idx === 0 ? '⭐ [העדכני ביותר] ' : ''}{new Date(s.session_date).toLocaleDateString('he-IL')} • {s.status}
                       </option>
                     ))}
                   </select>
@@ -642,7 +976,7 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
 
             <button
               type="submit"
-              disabled={!selectedClientId || isSaving || (receivedFiles.length === 0 && !sharedText)}
+              disabled={!selectedClientId || isSaving || (!hasFiles && !hasText)}
               className="px-6 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-xs transition-colors flex items-center gap-2 disabled:opacity-50"
             >
               {isSaving ? (
@@ -679,6 +1013,9 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
           </li>
           <li>
             האפליקציה תיפתח ישירות במסך זה, תזהה את הקובץ ותאפשר לך לשייך אותו ללקוח ולמפגש בלחיצה אחת!
+          </li>
+          <li>
+            <strong>במחשב / WhatsApp Web:</strong> תוכל גם להעתיק את התמונה או ההקלטה וללחוץ כאן על <strong>"הדבק מהלוח (Ctrl+V)"</strong> או לגרור את הקובץ ישירות לחלון!
           </li>
         </ol>
       </div>

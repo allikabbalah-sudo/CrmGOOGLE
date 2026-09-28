@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Phone, Mail, MapPin, Calendar as CalendarIcon, Heart, BookOpen, FileText } from 'lucide-react';
+import { X, User, Phone, Mail, MapPin, Calendar as CalendarIcon, Heart, BookOpen, FileText, Camera, Upload, Trash2 } from 'lucide-react';
 import { Client, ClientStatus, KABBALAH_READINGS } from '../../types';
 import { useOrganization } from '../../context/OrganizationContext';
 import { cleanEmail } from '../../lib/utils';
+import { compressImageFile } from '../../lib/indexedDbStorage';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -20,6 +21,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({
   const { members } = useOrganization();
 
   const [fullName, setFullName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<ClientStatus>('lead');
@@ -36,6 +38,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({
   useEffect(() => {
     if (clientToEdit) {
       setFullName(clientToEdit.full_name || '');
+      setAvatarUrl(clientToEdit.avatar_url || '');
       setPhone(clientToEdit.phone || '');
       setEmail(clientToEdit.email || '');
       setStatus(clientToEdit.status || 'lead');
@@ -50,6 +53,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({
       setAssignedTo(clientToEdit.assigned_to || '');
     } else {
       setFullName('');
+      setAvatarUrl('');
       setPhone('');
       setEmail('');
       setStatus('lead');
@@ -67,12 +71,26 @@ export const ClientModal: React.FC<ClientModalProps> = ({
 
   if (!isOpen) return null;
 
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImageFile(file, 400, 400, 0.85);
+      if (compressed) {
+        setAvatarUrl(compressed);
+      }
+    } catch (err) {
+      console.error('Failed to compress avatar:', err);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim() || !phone.trim()) return;
 
     onSave({
       full_name: fullName.trim(),
+      avatar_url: avatarUrl || undefined,
       phone: phone.trim(),
       email: cleanEmail(email),
       status,
@@ -112,6 +130,113 @@ export const ClientModal: React.FC<ClientModalProps> = ({
             <h4 className="text-xs font-bold text-primary tracking-wide uppercase border-b border-border pb-1">
               פרטי זיהוי קליניים
             </h4>
+
+            {/* Avatar Section */}
+            <div className="p-3.5 bg-muted/30 border border-border/80 rounded-2xl space-y-3">
+              <div className="flex items-center gap-4">
+                <div className="relative group shrink-0">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt="אווטר לקוח"
+                      className="w-16 h-16 rounded-full object-cover border-2 border-primary/40 shadow-sm"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full bg-primary/15 text-primary font-bold text-xl flex items-center justify-center border-2 border-primary/30">
+                      {fullName.trim() ? fullName.trim().charAt(0) : <User className="w-7 h-7" />}
+                    </div>
+                  )}
+                  <label
+                    htmlFor="avatar-file-modal"
+                    className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white cursor-pointer transition-opacity"
+                    title="החלף תמונה"
+                  >
+                    <Camera className="w-5 h-5" />
+                  </label>
+                </div>
+
+                <div className="flex-1 space-y-1 text-xs">
+                  <span className="font-semibold text-foreground block">תמונת פרופיל / אווטר ללקוח</span>
+                  <p className="text-[11px] text-muted-foreground">
+                    התמונה תוצג בכרטיס המטופל, ברשימת הלקוחות, ביומן המפגשים ובדשבורד
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <label
+                      htmlFor="avatar-file-modal"
+                      className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-bold rounded-xl cursor-pointer transition-colors flex items-center gap-1.5 shadow-2xs"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{avatarUrl ? 'החלף מהמכשיר' : 'העלה תמונה מהמכשיר'}</span>
+                    </label>
+                    <input
+                      id="avatar-file-modal"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarFileChange}
+                      className="hidden"
+                    />
+                    {avatarUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setAvatarUrl('')}
+                        className="px-2.5 py-1.5 text-rose-600 hover:bg-rose-500/10 border border-rose-300 dark:border-rose-800 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>הסר תמונה</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Preset Spiritual Avatars */}
+              <div className="pt-2 border-t border-border/50">
+                <span className="text-[11px] text-muted-foreground font-medium block mb-2">
+                  או בחר אווטר קבלי / אנרגטי מוכן:
+                </span>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {[
+                    {
+                      id: 'tree',
+                      label: 'עץ החיים',
+                      svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%230d9488"/><stop offset="100%" stop-color="%23042f2e"/></linearGradient></defs><rect width="100" height="100" rx="50" fill="url(%23g)"/><circle cx="50" cy="20" r="7" fill="%23fef08a"/><circle cx="30" cy="35" r="6" fill="%23bae6fd"/><circle cx="70" cy="35" r="6" fill="%23fbcfe8"/><circle cx="30" cy="65" r="6" fill="%23fed7aa"/><circle cx="70" cy="65" r="6" fill="%23bbf7d0"/><circle cx="50" cy="50" r="7" fill="%23fde047"/><circle cx="50" cy="80" r="8" fill="%23ffffff"/><line x1="50" y1="20" x2="30" y2="35" stroke="%23ffffff" stroke-width="2" opacity="0.6"/><line x1="50" y1="20" x2="70" y2="35" stroke="%23ffffff" stroke-width="2" opacity="0.6"/><line x1="30" y1="35" x2="70" y2="35" stroke="%23ffffff" stroke-width="2" opacity="0.6"/><line x1="30" y1="35" x2="50" y2="50" stroke="%23ffffff" stroke-width="2" opacity="0.6"/><line x1="70" y1="35" x2="50" y2="50" stroke="%23ffffff" stroke-width="2" opacity="0.6"/><line x1="50" y1="50" x2="50" y2="80" stroke="%23ffffff" stroke-width="2" opacity="0.6"/></svg>'
+                    },
+                    {
+                      id: 'soul',
+                      label: 'אור ונשמה',
+                      svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%236366f1"/><stop offset="100%" stop-color="%239333ea"/></linearGradient></defs><rect width="100" height="100" rx="50" fill="url(%23bg)"/><circle cx="50" cy="50" r="26" fill="%23ffffff" opacity="0.25"/><circle cx="50" cy="50" r="16" fill="%23ffffff" opacity="0.45"/><circle cx="50" cy="50" r="8" fill="%23fef08a"/><path d="M50 15 L50 25 M50 75 L50 85 M15 50 L25 50 M75 50 L85 50" stroke="%23fef08a" stroke-width="3" stroke-linecap="round"/></svg>'
+                    },
+                    {
+                      id: 'lotus',
+                      label: 'ריפוי וצמיחה',
+                      svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23059669"/><stop offset="100%" stop-color="%23047857"/></linearGradient></defs><rect width="100" height="100" rx="50" fill="url(%23bg)"/><circle cx="50" cy="50" r="24" fill="%23ecfdf5" opacity="0.3"/><path d="M50 25 C45 40 30 50 30 65 C30 75 40 80 50 80 C60 80 70 75 70 65 C70 50 55 40 50 25 Z" fill="%23a7f3d0"/></svg>'
+                    },
+                    {
+                      id: 'shield',
+                      label: 'מגן קבלי',
+                      svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23d97706"/><stop offset="100%" stop-color="%23b45309"/></linearGradient></defs><rect width="100" height="100" rx="50" fill="url(%23bg)"/><polygon points="50,22 76,68 24,68" stroke="%23fef3c7" stroke-width="3.5" fill="none"/><polygon points="50,78 76,32 24,32" stroke="%23fef3c7" stroke-width="3.5" fill="none"/><circle cx="50" cy="50" r="6" fill="%23fde68a"/></svg>'
+                    },
+                    {
+                      id: 'blue',
+                      label: 'שלווה',
+                      svg: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%230284c7"/><stop offset="100%" stop-color="%231e40af"/></linearGradient></defs><rect width="100" height="100" rx="50" fill="url(%23bg)"/><circle cx="50" cy="38" r="16" fill="%23e0f2fe"/><path d="M26 80 C26 64 36 58 50 58 C64 58 74 64 74 80 Z" fill="%23e0f2fe"/></svg>'
+                    }
+                  ].map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setAvatarUrl(preset.svg)}
+                      title={preset.label}
+                      className={`relative shrink-0 rounded-full p-0.5 border-2 transition-transform hover:scale-105 ${
+                        avatarUrl === preset.svg ? 'border-primary ring-2 ring-primary/40' : 'border-border'
+                      }`}
+                    >
+                      <img src={preset.svg} alt={preset.label} className="w-8 h-8 rounded-full" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>

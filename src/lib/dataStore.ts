@@ -104,20 +104,91 @@ export function normalizeNameForMatching(name?: string): string {
   return String(name).trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+export function splitFullName(fullName: string = ''): { firstName: string; lastName: string } {
+  const clean = (fullName || '').trim();
+  if (!clean) return { firstName: '', lastName: '' };
+  const parts = clean.split(/\s+/);
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: '' };
+  }
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(' '),
+  };
+}
+
+export function formatClientToCustomExport(client: Client): Record<string, any> {
+  const anyClient = client as any;
+  const rawFullName = client.full_name?.trim() || anyClient.fullName?.trim() || '';
+  const { firstName: splitFirst, lastName: splitLast } = splitFullName(rawFullName);
+  
+  const firstName = anyClient.firstName || anyClient.first_name || splitFirst || '';
+  const lastName = anyClient.lastName || anyClient.last_name || splitLast || '';
+  const status = client.status || anyClient.status || 'lead';
+  const userId = anyClient.userId || client.id || '';
+
+  // Return object strictly beginning with firstName, lastName, status, userId
+  // followed by all other details of the client
+  return {
+    firstName,
+    lastName,
+    status,
+    userId,
+    // Complete client details (camelCase & snake_case)
+    id: client.id || '',
+    fullName: rawFullName,
+    phone: client.phone || anyClient.phone || '',
+    email: client.email || anyClient.email || '',
+    motherName: client.mother_name || anyClient.motherName || '',
+    dateOfBirth: client.date_of_birth || anyClient.dateOfBirth || '',
+    address: client.address || anyClient.address || '',
+    avatarUrl: client.avatar_url || anyClient.avatarUrl || '',
+    selectedReading: client.selected_reading || anyClient.selectedReading || '',
+    partnerFullName: client.partner_full_name || anyClient.partnerFullName || '',
+    partnerDob: client.partner_dob || anyClient.partnerDob || '',
+    partnerMotherName: client.partner_mother_name || anyClient.partnerMotherName || '',
+    notes: client.notes || anyClient.notes || '',
+    assignedTo: client.assigned_to || anyClient.assignedTo || '',
+    createdBy: client.created_by || anyClient.createdBy || '',
+    organizationId: client.organization_id || anyClient.organizationId || '',
+    lastCompletedSessionAt: client.last_completed_session_at || anyClient.lastCompletedSessionAt || '',
+    createdAt: client.created_at || anyClient.createdAt || '',
+    updatedAt: client.updated_at || anyClient.updatedAt || '',
+    // DB original fields
+    full_name: client.full_name || rawFullName,
+    mother_name: client.mother_name || anyClient.motherName || '',
+    date_of_birth: client.date_of_birth || anyClient.dateOfBirth || '',
+    avatar_url: client.avatar_url || anyClient.avatarUrl || '',
+    selected_reading: client.selected_reading || anyClient.selectedReading || '',
+    partner_full_name: client.partner_full_name || anyClient.partnerFullName || '',
+    partner_dob: client.partner_dob || anyClient.partnerDob || '',
+    partner_mother_name: client.partner_mother_name || anyClient.partnerMotherName || '',
+    assigned_to: client.assigned_to || anyClient.assignedTo || '',
+    created_by: client.created_by || anyClient.createdBy || '',
+    organization_id: client.organization_id || anyClient.organizationId || '',
+    last_completed_session_at: client.last_completed_session_at || anyClient.lastCompletedSessionAt || '',
+    created_at: client.created_at || anyClient.createdAt || '',
+    updated_at: client.updated_at || anyClient.updatedAt || '',
+  };
+}
+
 export function findExistingClientMatch(
-  imported: Partial<Client>,
+  imported: Partial<Client> | Record<string, any>,
   existingClients: Client[]
 ): Client | undefined {
   if (!existingClients || existingClients.length === 0 || !imported) return undefined;
 
-  // 1. Direct ID match
-  if (imported.id) {
-    const byId = existingClients.find((c) => c && c.id === imported.id);
+  const imp = imported as Record<string, any>;
+  const effectiveId = imp.id ? String(imp.id).trim() : imp.userId ? String(imp.userId).trim() : '';
+
+  // 1. Direct ID / userId match
+  if (effectiveId) {
+    const byId = existingClients.find((c) => c && (c.id === effectiveId || (c as any).userId === effectiveId));
     if (byId) return byId;
   }
 
   // 2. Phone match (ignoring dashes, spaces, +972)
-  const normPhone = normalizePhoneForMatching(imported.phone);
+  const normPhone = normalizePhoneForMatching(imp.phone);
   if (normPhone && normPhone.length >= 7) {
     const byPhone = existingClients.find((c) => {
       const cNorm = normalizePhoneForMatching(c.phone);
@@ -127,7 +198,7 @@ export function findExistingClientMatch(
   }
 
   // 3. Email match (case-insensitive)
-  const normEmail = normalizeEmailForMatching(imported.email);
+  const normEmail = normalizeEmailForMatching(imp.email);
   if (normEmail && normEmail.includes('@') && normEmail.length >= 5) {
     const byEmail = existingClients.find((c) => {
       const cNorm = normalizeEmailForMatching(c.email);
@@ -136,8 +207,9 @@ export function findExistingClientMatch(
     if (byEmail) return byEmail;
   }
 
-  // 4. Exact Full Name match (trimmed, case-insensitive)
-  const normName = normalizeNameForMatching(imported.full_name);
+  // 4. Exact Full Name match (from full_name, fullName, or firstName + lastName)
+  const rawFullName = imp.full_name || imp.fullName || (imp.firstName ? `${imp.firstName} ${imp.lastName || ''}`.trim() : '');
+  const normName = normalizeNameForMatching(rawFullName);
   if (normName && normName.length >= 2) {
     const byName = existingClients.find((c) => {
       const cNorm = normalizeNameForMatching(c.full_name);
@@ -149,34 +221,75 @@ export function findExistingClientMatch(
   return undefined;
 }
 
-export function mergeClientRecord(existing: Client, imported: Partial<Client>): Client {
+export function mergeClientRecord(existing: Client, imported: Partial<Client> | Record<string, any>): Client {
+  const imp = imported as Record<string, any>;
   const isNotEmpty = (val: any) => val !== undefined && val !== null && String(val).trim() !== '';
 
   const mergedNotes = () => {
     const exNotes = existing.notes?.trim() || '';
-    const imNotes = imported.notes?.trim() || '';
+    const imNotes = (imp.notes || '').trim();
     if (!imNotes) return exNotes;
     if (!exNotes) return imNotes;
     if (exNotes.includes(imNotes)) return exNotes;
     return `${exNotes}\n---\n${imNotes}`;
   };
 
+  const incomingName = isNotEmpty(imp.full_name)
+    ? String(imp.full_name).trim()
+    : isNotEmpty(imp.fullName)
+    ? String(imp.fullName).trim()
+    : isNotEmpty(imp.firstName)
+    ? `${String(imp.firstName).trim()} ${String(imp.lastName || '').trim()}`.trim()
+    : existing.full_name;
+
   return {
     ...existing,
-    full_name: isNotEmpty(imported.full_name) ? String(imported.full_name).trim() : existing.full_name,
-    phone: isNotEmpty(imported.phone) ? String(imported.phone).trim() : existing.phone,
-    email: isNotEmpty(imported.email) ? String(imported.email).trim() : existing.email,
-    address: isNotEmpty(imported.address) ? String(imported.address).trim() : existing.address,
-    mother_name: isNotEmpty(imported.mother_name) ? String(imported.mother_name).trim() : existing.mother_name,
-    date_of_birth: isNotEmpty(imported.date_of_birth) ? String(imported.date_of_birth).trim() : existing.date_of_birth,
-    status: isNotEmpty(imported.status) ? (imported.status as ClientStatus) : existing.status,
+    full_name: incomingName || existing.full_name,
+    phone: isNotEmpty(imp.phone) ? String(imp.phone).trim() : existing.phone,
+    email: isNotEmpty(imp.email) ? String(imp.email).trim() : existing.email,
+    address: isNotEmpty(imp.address) ? String(imp.address).trim() : existing.address,
+    mother_name: isNotEmpty(imp.mother_name)
+      ? String(imp.mother_name).trim()
+      : isNotEmpty(imp.motherName)
+      ? String(imp.motherName).trim()
+      : existing.mother_name,
+    date_of_birth: isNotEmpty(imp.date_of_birth)
+      ? String(imp.date_of_birth).trim()
+      : isNotEmpty(imp.dateOfBirth)
+      ? String(imp.dateOfBirth).trim()
+      : existing.date_of_birth,
+    status: isNotEmpty(imp.status) ? (imp.status as ClientStatus) : existing.status,
     notes: mergedNotes(),
-    assigned_to: isNotEmpty(imported.assigned_to) ? imported.assigned_to : existing.assigned_to,
-    avatar_url: isNotEmpty(imported.avatar_url) ? imported.avatar_url : existing.avatar_url,
-    selected_reading: isNotEmpty(imported.selected_reading) ? imported.selected_reading : existing.selected_reading,
-    partner_full_name: isNotEmpty(imported.partner_full_name) ? imported.partner_full_name : existing.partner_full_name,
-    partner_dob: isNotEmpty(imported.partner_dob) ? imported.partner_dob : existing.partner_dob,
-    partner_mother_name: isNotEmpty(imported.partner_mother_name) ? imported.partner_mother_name : existing.partner_mother_name,
+    assigned_to: isNotEmpty(imp.assigned_to)
+      ? imp.assigned_to
+      : isNotEmpty(imp.assignedTo)
+      ? imp.assignedTo
+      : existing.assigned_to,
+    avatar_url: isNotEmpty(imp.avatar_url)
+      ? imp.avatar_url
+      : isNotEmpty(imp.avatarUrl)
+      ? imp.avatarUrl
+      : existing.avatar_url,
+    selected_reading: isNotEmpty(imp.selected_reading)
+      ? imp.selected_reading
+      : isNotEmpty(imp.selectedReading)
+      ? imp.selectedReading
+      : existing.selected_reading,
+    partner_full_name: isNotEmpty(imp.partner_full_name)
+      ? imp.partner_full_name
+      : isNotEmpty(imp.partnerFullName)
+      ? imp.partnerFullName
+      : existing.partner_full_name,
+    partner_dob: isNotEmpty(imp.partner_dob)
+      ? imp.partner_dob
+      : isNotEmpty(imp.partnerDob)
+      ? imp.partnerDob
+      : existing.partner_dob,
+    partner_mother_name: isNotEmpty(imp.partner_mother_name)
+      ? imp.partner_mother_name
+      : isNotEmpty(imp.partnerMotherName)
+      ? imp.partnerMotherName
+      : existing.partner_mother_name,
     updated_at: new Date().toISOString(),
   };
 }
@@ -1515,7 +1628,7 @@ class DataStore {
   // SESSIONS
   public getSessions(clientId?: string, programId?: string, orgId = this.state.activeOrgId): Session[] {
     const list = this.state.sessions || [];
-    return list.filter((s) => {
+    const filtered = list.filter((s) => {
       if (orgId && s.organization_id && s.organization_id !== orgId) {
         const hasOrgMatches = list.some((x) => x.organization_id === orgId);
         if (hasOrgMatches) return false;
@@ -1524,6 +1637,25 @@ class DataStore {
       if (programId && s.program_id !== programId) return false;
       return true;
     });
+
+    // Sort: most recent at the top (descending by session_date, then created_at)
+    return filtered.sort((a, b) => {
+      const timeA = a.session_date ? new Date(a.session_date).getTime() : 0;
+      const timeB = b.session_date ? new Date(b.session_date).getTime() : 0;
+      if (timeB !== timeA) return timeB - timeA;
+      const crA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const crB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return crB - crA;
+    });
+  }
+
+  public deleteSession(sessionId: string) {
+    const sess = this.state.sessions.find((s) => s.id === sessionId);
+    this.state.sessions = this.state.sessions.filter((s) => s.id !== sessionId);
+    if (sess) {
+      this.logActivity(sess.client_id, 'session_deleted', { date: sess.session_date });
+    }
+    this.saveState();
   }
 
   public addSession(sessionData: Omit<Session, 'id' | 'created_at' | 'organization_id'>): Session {
@@ -1774,6 +1906,11 @@ class DataStore {
       mediaFiles: this.state.mediaFiles,
       activityLogs: this.state.activityLogs,
     };
+  }
+
+  public exportClientsCustomFormat(clients?: Client[]): any[] {
+    const list = clients || this.getClients();
+    return list.map((c) => formatClientToCustomExport(c));
   }
 
   public importAllData(

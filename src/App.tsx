@@ -132,7 +132,7 @@ function MainApp() {
     if (currentPath === '/settings') {
       return <SettingsView />;
     }
-    if (currentPath === '/share-receive') {
+    if (currentPath === '/share-receive' || currentPath.startsWith('/share-receive?') || currentPath.startsWith('/share-receive/')) {
       return <ShareReceiveView onNavigate={navigate} />;
     }
 
