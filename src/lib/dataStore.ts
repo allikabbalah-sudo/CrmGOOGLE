@@ -346,15 +346,34 @@ class DataStore {
   constructor() {
     this.pruneOldStorageKeys();
     this.state = this.sanitizeState(this.loadState());
+    this.ensureDefaultUser();
     this.deleteOrgsExceptEliran();
     this.state = this.sanitizeState(this.state);
     this.writeToLocalStorage(this.state);
     this.hydrateFromIDB();
     if (this.state.currentUserId) {
       this.initCloudSync(this.state.currentUserId);
-      if ((this.state.clients || []).length > 0 || (this.state.programs || []).length > 0) {
-        this.scheduleCloudSync();
-      }
+      this.scheduleCloudSync();
+    }
+  }
+
+  private ensureDefaultUser() {
+    const defaultEmail = 'alli.kabbalah@gmail.com';
+    const defaultId = getDeterministicUserId(defaultEmail);
+    if (!this.state.currentUserId) {
+      this.state.currentUserId = defaultId;
+    }
+    const hasProfile = (this.state.profiles || []).some(
+      (p) => p.id === defaultId || p.email.toLowerCase() === defaultEmail
+    );
+    if (!hasProfile) {
+      const defaultProf = {
+        id: defaultId,
+        full_name: 'אלי קבלה',
+        email: defaultEmail,
+        created_at: new Date().toISOString(),
+      };
+      this.state.profiles = [defaultProf, ...(this.state.profiles || [])];
     }
   }
 
@@ -583,31 +602,30 @@ class DataStore {
       const userProfileRef = doc(db, 'users', userId);
       const currProfile = this.getCurrentProfile();
 
-      const profileNeedsSync =
-        !this.lastProfileSync ||
-        this.lastProfileSync.userId !== userId ||
-        this.lastProfileSync.email !== currProfile.email ||
-        this.lastProfileSync.fullName !== currProfile.full_name ||
-        Date.now() - this.lastProfileSync.time > 300000;
-
-      if (profileNeedsSync) {
-        await setDoc(
-          userProfileRef,
-          stripUndefinedDeep({
-            userId,
-            email: currProfile.email || '',
-            fullName: currProfile.full_name || '',
-            updatedAt: new Date().toISOString(),
-          }),
-          { merge: true }
-        );
-        this.lastProfileSync = {
+      await setDoc(
+        userProfileRef,
+        stripUndefinedDeep({
           userId,
-          email: currProfile.email || '',
-          fullName: currProfile.full_name || '',
-          time: Date.now(),
-        };
-      }
+          email: currProfile.email || 'alli.kabbalah@gmail.com',
+          fullName: currProfile.full_name || 'אלי קבלה',
+          clientCount: (this.state.clients || []).length,
+          sessionsCount: (this.state.sessions || []).length,
+          programsCount: (this.state.programs || []).length,
+          tasksCount: (this.state.tasks || []).length,
+          mediaCount: (this.state.mediaFiles || []).length,
+          activeOrgId: this.state.activeOrgId || '',
+          lastSyncAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'active',
+        }),
+        { merge: true }
+      );
+      this.lastProfileSync = {
+        userId,
+        email: currProfile.email || 'alli.kabbalah@gmail.com',
+        fullName: currProfile.full_name || 'אלי קבלה',
+        time: Date.now(),
+      };
 
       // Separate heavy media files and blobs into subcollection sync
       const mediaBlobsToSync: { id: string; dataUrl: string }[] = [];
@@ -734,6 +752,29 @@ class DataStore {
       // JSON.parse guarantees a clean object with no undefined values or prototype discrepancies
       const firestorePayload = JSON.parse(jsonStr);
       await setDoc(docRef, firestorePayload, { merge: true });
+
+      // Synchronize clients subcollection for direct browsing in Firebase Console
+      for (const client of (this.state.clients || [])) {
+        if (!client || !client.id) continue;
+        const clientDocRef = doc(db, 'users', userId, 'clients', client.id);
+        await setDoc(
+          clientDocRef,
+          stripUndefinedDeep({
+            id: client.id,
+            full_name: client.full_name || '',
+            phone: client.phone || '',
+            email: client.email || '',
+            status: client.status || 'active',
+            mother_name: client.mother_name || '',
+            address: client.address || '',
+            date_of_birth: client.date_of_birth || '',
+            selected_reading: client.selected_reading || '',
+            created_at: client.created_at || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }),
+          { merge: true }
+        ).catch(() => {});
+      }
 
       // Asynchronously sync new mediaBlobs to Firestore subcollection
       for (const item of mediaBlobsToSync) {
@@ -951,7 +992,7 @@ class DataStore {
 
     if (!eliranOrg) {
       const newOrgId = 'org_eliran_default';
-      const currUserId = this.state.currentUserId || 'usr_alli_kabbalah_gmail_com';
+      const currUserId = this.state.currentUserId || getDeterministicUserId('alli.kabbalah@gmail.com');
       const currProf = this.getCurrentProfile();
       eliranOrg = {
         id: newOrgId,

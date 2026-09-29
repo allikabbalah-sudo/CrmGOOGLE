@@ -22,6 +22,20 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["userId"]
+    },
+    "ClientRecord": {
+      "title": "ClientRecord",
+      "description": "Individual client record under user clients collection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "full_name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "full_name"]
     }
   },
   "firestore": {
@@ -32,6 +46,10 @@
     "/users/{userId}/appData/state": {
       "schema": "UserAppData",
       "description": "Real-time synchronized state document containing complete CRM data profile for the user"
+    },
+    "/users/{userId}/clients/{clientId}": {
+      "schema": "ClientRecord",
+      "description": "Directly accessible client record document"
     }
   }
 }

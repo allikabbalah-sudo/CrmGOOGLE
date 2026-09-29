@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer, disableNetwork, setLogLevel } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, setDoc, setLogLevel } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Silence Firestore internal SDK log noise (e.g. backoff retries when quota is reached)
@@ -131,7 +131,15 @@ export async function testFirestoreConnection() {
   }
 
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await setDoc(
+      doc(db, 'test', 'connection'),
+      {
+        status: 'connected',
+        app: 'Kabbalah CRM',
+        verifiedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
     console.log('Successfully connected to Firestore cloud database.');
   } catch (error) {
     if (isQuotaOrNetworkError(error)) {
