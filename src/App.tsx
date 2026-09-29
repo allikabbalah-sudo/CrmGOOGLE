@@ -111,7 +111,7 @@ function MainApp() {
       return <ClientsView onNavigate={navigate} />;
     }
     if (currentPath.startsWith('/clients/')) {
-      const clientId = currentPath.replace('/clients/', '');
+      const clientId = currentPath.replace('/clients/', '').split('?')[0];
       return <ClientDetailView clientId={clientId} onNavigate={navigate} />;
     }
     if (currentPath === '/pipeline') {

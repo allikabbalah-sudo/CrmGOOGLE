@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Users,
   Search,
@@ -33,6 +33,11 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [uploadingClientId, setUploadingClientId] = useState<string | null>(null);
+  const [, setStoreTick] = useState(0);
+
+  useEffect(() => {
+    return dataStore.subscribe(() => setStoreTick((t) => t + 1));
+  }, []);
 
   const clients = dataStore.getClients() || [];
 

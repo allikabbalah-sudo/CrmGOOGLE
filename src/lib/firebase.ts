@@ -12,7 +12,12 @@ try {
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
+
+const customDbId = (firebaseConfig as any).firestoreDatabaseId;
+export const db =
+  customDbId && customDbId !== '(default)' && customDbId !== 'crmgoogle' && String(customDbId).trim() !== ''
+    ? getFirestore(app, customDbId)
+    : getFirestore(app);
 
 export enum OperationType {
   CREATE = 'create',

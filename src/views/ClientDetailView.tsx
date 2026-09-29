@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   User,
   Phone,
@@ -23,6 +23,10 @@ import {
   CheckCircle2,
   Camera,
   Upload,
+  FileAudio,
+  FileImage,
+  Volume2,
+  ExternalLink,
 } from 'lucide-react';
 import { dataStore } from '../lib/dataStore';
 import { Client, Program, Session, CLIENT_STATUS_LABELS } from '../types';
@@ -41,10 +45,39 @@ interface ClientDetailViewProps {
 }
 
 export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, onNavigate }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'clinical' | 'media'>('general');
+  const cleanClientId = clientId.split('?')[0];
+
+  const initialTab = useMemo<'general' | 'clinical' | 'media'>(() => {
+    if (typeof window !== 'undefined') {
+      const search = window.location.search || '';
+      if (search.includes('tab=media') || clientId.includes('tab=media')) return 'media';
+      if (search.includes('tab=clinical') || clientId.includes('tab=clinical')) return 'clinical';
+    }
+    return 'general';
+  }, [clientId]);
+
+  const [activeTab, setActiveTab] = useState<'general' | 'clinical' | 'media'>(initialTab);
   const [callNoteInput, setCallNoteInput] = useState('');
   const [sessionSortOrder, setSessionSortOrder] = useState<'desc' | 'asc'>('desc');
   const [clinicalSubView, setClinicalSubView] = useState<'programs' | 'timeline'>('programs');
+  const [, setStoreTick] = useState(0);
+
+  // Subscribe to real-time updates from dataStore
+  useEffect(() => {
+    return dataStore.subscribe(() => setStoreTick((t) => t + 1));
+  }, []);
+
+  // Synchronize tab if prop or URL changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const search = window.location.search || '';
+      if (search.includes('tab=media') || clientId.includes('tab=media')) {
+        setActiveTab('media');
+      } else if (search.includes('tab=clinical') || clientId.includes('tab=clinical')) {
+        setActiveTab('clinical');
+      }
+    }
+  }, [clientId]);
 
   // Modals
   const [isEditClientOpen, setIsEditClientOpen] = useState(false);
@@ -54,15 +87,27 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [isLiveReadingOpen, setIsLiveReadingOpen] = useState(false);
 
-  const client = dataStore.getClientById(clientId);
-  const programs = dataStore.getPrograms(clientId);
-  const sessions = dataStore.getSessions(clientId);
-  const tasks = dataStore.getTasks().filter((t) => t.client_id === clientId);
-  const mediaFiles = dataStore.getMediaFiles(clientId);
+  const client = dataStore.getClientById(cleanClientId);
+  const programs = dataStore.getPrograms(cleanClientId);
+  const sessions = dataStore.getSessions(cleanClientId);
+  const tasks = dataStore.getTasks().filter((t) => t.client_id === cleanClientId);
+
+  // Fetch all media files related to this client (both direct and via client programs)
+  const directMediaFiles = dataStore.getMediaFiles(cleanClientId) || [];
+  const programIds = new Set(programs.map((p) => p.id));
+  const allRelatedMedia = (dataStore.getAllMediaFiles() || []).filter(
+    (m) => m.parent_id === cleanClientId || programIds.has(m.parent_id)
+  );
+  const mediaMap = new Map<string, any>();
+  allRelatedMedia.forEach((m) => mediaMap.set(m.id, m));
+  directMediaFiles.forEach((m) => mediaMap.set(m.id, m));
+  const mediaFiles = Array.from(mediaMap.values()).sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
 
   const handleAddNewSession = (programId?: string) => {
     const newSess = dataStore.addSession({
-      client_id: clientId,
+      client_id: cleanClientId,
       program_id: programId || null,
       session_date: new Date().toISOString(),
       status: 'scheduled',
@@ -401,6 +446,98 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                   </button>
                 </div>
               </form>
+            </div>
+
+            {/* Recent Media & Recordings Preview Card */}
+            <div className="bg-card border border-border rounded-2xl p-5 shadow-xs space-y-3">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-teal-500/10 text-teal-600 dark:text-teal-400 rounded-xl">
+                    <Folder className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-foreground">
+                      מדיה, תמונות והקלטות ששותפו ({mediaFiles.length})
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">
+                      הקלטות וואטסאפ, קבצי שמע ומסמכים המשוייכים ללקוח
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('media')}
+                  className="text-xs font-bold text-teal-600 hover:text-teal-700 hover:underline flex items-center gap-1"
+                >
+                  <span>פתח גלריה מלאה</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {mediaFiles.length === 0 ? (
+                <div className="p-4 bg-muted/20 border border-dashed border-border rounded-xl text-center space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    טרם נשמרו הקלטות קול או תמונות בכרטיס לקוח זה.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('media')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>העלה קובץ או הקלטה לגלריה</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {mediaFiles.slice(0, 3).map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-3 bg-muted/30 border border-border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-card rounded-lg border border-border shrink-0">
+                          {item.type === 'audio' ? (
+                            <FileAudio className="w-5 h-5 text-indigo-600" />
+                          ) : (
+                            <FileImage className="w-5 h-5 text-emerald-600" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-xs text-foreground truncate">{item.name}</h4>
+                          <span className="text-[10px] text-muted-foreground">
+                            {item.created_at ? formatHebrewDate(item.created_at, 'dd/MM/yyyy HH:mm') : ''}
+                          </span>
+                        </div>
+                      </div>
+
+                      {item.type === 'audio' && item.url && !item.url.startsWith('cloud_media:') && (
+                        <audio controls className="h-8 max-w-full sm:max-w-xs shrink-0 rounded" src={item.url} />
+                      )}
+
+                      {item.type === 'image' && item.url && !item.url.startsWith('cloud_media:') && (
+                        <img
+                          src={item.url}
+                          alt={item.name}
+                          className="w-10 h-10 object-cover rounded-lg border border-border shrink-0"
+                        />
+                      )}
+                    </div>
+                  ))}
+
+                  {mediaFiles.length > 3 && (
+                    <div className="text-center pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('media')}
+                        className="text-xs text-muted-foreground hover:text-foreground font-semibold hover:underline"
+                      >
+                        + עוד {mediaFiles.length - 3} קבצים נוספים בגלריה
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Full Clinical Notes */}
@@ -970,7 +1107,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
         <div className="bg-card border border-border rounded-2xl p-5 shadow-xs space-y-4">
           <h3 className="font-bold text-sm text-foreground">גלריית מדיה, הקלטות קול וקבצים</h3>
           <FileGallery
-            parentId={clientId}
+            parentId={cleanClientId}
             category="client"
             targetName={client.full_name}
             mediaFiles={mediaFiles}
@@ -995,7 +1132,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
         isOpen={isProgramModalOpen}
         onClose={() => setIsProgramModalOpen(false)}
         onSave={handleSaveProgram}
-        clientId={clientId}
+        clientId={cleanClientId}
         programToEdit={editingProgram}
       />
 
@@ -1010,7 +1147,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
       <LiveReadingModal
         isOpen={isLiveReadingOpen}
         onClose={() => setIsLiveReadingOpen(false)}
-        clientId={clientId}
+        clientId={cleanClientId}
         clientName={client.full_name}
         onPerformReading={handlePerformReading}
       />

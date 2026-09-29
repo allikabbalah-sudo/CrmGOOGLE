@@ -18,10 +18,15 @@ import {
   RefreshCw,
   Clipboard,
   Trash2,
+  Plus,
+  Phone,
+  Mail,
+  X,
 } from 'lucide-react';
 import { dataStore } from '../lib/dataStore';
 import { formatFileSize, generateUUID } from '../lib/utils';
 import { saveMediaBlobToIDB } from '../lib/indexedDbStorage';
+import { ClientModal } from '../components/dialogs/ClientModal';
 
 interface ShareReceiveViewProps {
   onNavigate: (path: string) => void;
@@ -115,9 +120,16 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  // Subscription to dataStore updates
+  const [, setStoreTick] = useState(0);
+  useEffect(() => {
+    return dataStore.subscribe(() => setStoreTick((t) => t + 1));
+  }, []);
+
   // Client Selection & Target
   const [selectedClientId, setSelectedClientId] = useState('');
   const [clientSearch, setClientSearch] = useState('');
+  const [isQuickAddClientOpen, setIsQuickAddClientOpen] = useState(false);
   const [selectedProgramId, setSelectedProgramId] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [targetType, setTargetType] = useState<'gallery' | 'session' | 'note'>('gallery');
@@ -125,18 +137,21 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
   const [savedSuccessClientId, setSavedSuccessClientId] = useState<string | null>(null);
 
   const clients = dataStore.getClients() || [];
+  const selectedClient = clients.find((c) => c && c.id === selectedClientId);
   const availablePrograms = selectedClientId ? dataStore.getPrograms(selectedClientId) : [];
   const availableSessions = selectedClientId ? dataStore.getSessions(selectedClientId) : [];
 
   const filteredClients = useMemo(() => {
-    if (!clientSearch.trim()) return clients;
-    const q = clientSearch.toLowerCase();
-    return clients.filter(
-      (c) =>
-        c.full_name.toLowerCase().includes(q) ||
-        (c.phone && c.phone.includes(q)) ||
-        (c.email && c.email.toLowerCase().includes(q))
-    );
+    const list = clients || [];
+    if (!clientSearch.trim()) return list;
+    const q = clientSearch.trim().toLowerCase();
+    return list.filter((c) => {
+      if (!c) return false;
+      const name = String(c.full_name || '').toLowerCase();
+      const phone = String(c.phone || '').toLowerCase();
+      const email = String(c.email || '').toLowerCase();
+      return name.includes(q) || phone.includes(q) || email.includes(q);
+    });
   }, [clients, clientSearch]);
 
   // Helper to ingest an array of File or Blob objects
@@ -495,16 +510,10 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
 
       // 2. Save each received file
       for (const item of receivedFiles) {
-        const mediaFileId = generateUUID();
         const dataToPersist = item.dataUrl || item.url;
 
-        // Persist binary to IndexedDB
-        if (dataToPersist && !dataToPersist.startsWith('http')) {
-          await saveMediaBlobToIDB(mediaFileId, dataToPersist);
-        }
-
-        // Add to dataStore
-        dataStore.addMediaFile({
+        // Add to dataStore (generates unique ID and links to parent)
+        const addedMedia = dataStore.addMediaFile({
           name: item.name,
           size: item.size,
           type: item.type,
@@ -512,6 +521,11 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
           parent_id: selectedProgramId || selectedClientId,
           url: dataToPersist,
         });
+
+        // Ensure IndexedDB holds binary under the exact addedMedia.id
+        if (dataToPersist && !dataToPersist.startsWith('http')) {
+          await saveMediaBlobToIDB(addedMedia.id, dataToPersist).catch(() => {});
+        }
 
         // If user chose to link to an existing session
         if (targetType === 'session' && selectedSessionId) {
@@ -551,6 +565,9 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
         });
       }
 
+      // Force immediate cloud sync so second device receives the update right away
+      await dataStore.forceImmediateCloudSync().catch(() => {});
+
       // Clean up server buffer & service worker cache after successful save
       fetch('/api/server-shared-files/clear', { method: 'POST' }).catch(() => {});
       if (typeof caches !== 'undefined') {
@@ -587,17 +604,23 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
             הקובץ שוייך לכרטיס של <strong>{client?.full_name || 'הלקוח'}</strong>
           </p>
         </div>
-        <div className="flex items-center justify-center gap-3 pt-3">
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-3">
           <button
-            onClick={() => onNavigate(`/clients/${savedSuccessClientId}`)}
+            onClick={() => onNavigate(`/clients/${savedSuccessClientId}?tab=media`)}
             className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-colors flex items-center gap-2"
           >
-            <span>מעבר לכרטיס הלקוח</span>
+            <span>צפה במדיה בגלריית הלקוח</span>
             <ArrowRight className="w-4 h-4" />
           </button>
           <button
-            onClick={() => onNavigate('/dashboard')}
+            onClick={() => onNavigate(`/clients/${savedSuccessClientId}`)}
             className="px-4 py-2.5 bg-card hover:bg-muted text-foreground border border-border font-medium text-xs sm:text-sm rounded-xl transition-colors"
+          >
+            לכרטיס הלקוח הכללי
+          </button>
+          <button
+            onClick={() => onNavigate('/dashboard')}
+            className="px-4 py-2.5 bg-card hover:bg-muted text-muted-foreground font-medium text-xs sm:text-sm rounded-xl transition-colors"
           >
             ללוח הבקרה
           </button>
@@ -834,39 +857,152 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
 
         {/* Form: Select Client & Destination */}
         <form onSubmit={handleSaveToClient} className="space-y-4 pt-2">
-          {/* Client Search & Selector */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-foreground">
-              בחר לקוח לקליטת הקובץ *
-            </label>
-            <div className="relative">
-              <Search className="w-4 h-4 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="חיפוש לקוח לפי שם, טלפון או דוא״ל..."
-                value={clientSearch}
-                onChange={(e) => setClientSearch(e.target.value)}
-                className="w-full pr-9 pl-3 py-2 text-xs bg-muted/30 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
-              />
+          {/* Client Search & Interactive Selector */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-foreground">
+                בחר לקוח לקליטת הקובץ *
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsQuickAddClientOpen(true)}
+                className="text-xs text-teal-600 hover:text-teal-700 font-bold flex items-center gap-1 hover:underline"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ לקוח חדש</span>
+              </button>
             </div>
 
-            <select
-              required
-              value={selectedClientId}
-              onChange={(e) => {
-                setSelectedClientId(e.target.value);
-                setSelectedProgramId('');
-                setSelectedSessionId('');
-              }}
-              className="w-full px-3 py-2.5 text-xs bg-card border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium mt-1.5"
-            >
-              <option value="">-- לחץ לבחירת הלקוח מתוך הרשימה ({filteredClients.length}) --</option>
-              {filteredClients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.full_name} {c.phone ? `(${c.phone})` : ''}
-                </option>
-              ))}
-            </select>
+            {selectedClient ? (
+              <div className="p-3 bg-teal-500/10 border border-teal-500/30 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-full bg-teal-600 text-white font-bold flex items-center justify-center text-xs overflow-hidden shrink-0 shadow-xs">
+                    {selectedClient.avatar_url ? (
+                      <img
+                        src={selectedClient.avatar_url}
+                        alt={selectedClient.full_name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      (selectedClient.full_name || 'לק').substring(0, 2)
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
+                      <h4 className="font-extrabold text-xs sm:text-sm text-foreground truncate">
+                        {selectedClient.full_name}
+                      </h4>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                      {selectedClient.phone ? `טלפון: ${selectedClient.phone}` : selectedClient.email || 'לקוח נבחר לקליטת השיתוף'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedClientId('');
+                    setSelectedProgramId('');
+                    setSelectedSessionId('');
+                    setClientSearch('');
+                  }}
+                  className="px-3 py-1.5 bg-card hover:bg-muted text-foreground border border-border rounded-xl text-xs font-semibold shrink-0 transition-colors"
+                >
+                  החלף לקוח
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="הקלד שם לקוח, טלפון או דוא״ל לחיפוש מהיר..."
+                    value={clientSearch}
+                    onChange={(e) => setClientSearch(e.target.value)}
+                    className="w-full pr-9 pl-8 py-2.5 text-xs bg-card border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium shadow-2xs"
+                  />
+                  {clientSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setClientSearch('')}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Instant Search Results / Client List */}
+                <div className="space-y-1 max-h-56 overflow-y-auto border border-border rounded-xl p-1.5 bg-card shadow-inner">
+                  {filteredClients.length === 0 ? (
+                    <div className="p-4 text-center space-y-2.5">
+                      <p className="text-xs text-muted-foreground">
+                        {clientSearch.trim()
+                          ? `לא נמצאו לקוחות התואמים לחיפוש "${clientSearch}"`
+                          : clients.length === 0
+                          ? 'טוען לקוחות מהענן או שטרם נוספו לקוחות'
+                          : 'הקלד בתיבת החיפוש או בחר מטה'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsQuickAddClientOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>צור לקוח חדש עבור קובץ זה</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="px-2 py-1 text-[11px] font-bold text-muted-foreground flex items-center justify-between">
+                        <span>תוצאות חיפוש לקוחות ({filteredClients.length}):</span>
+                        <span className="text-[10px] font-normal">לחץ על לקוח לבחירה</span>
+                      </div>
+                      {filteredClients.slice(0, 10).map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedClientId(c.id);
+                            setSelectedProgramId('');
+                            setSelectedSessionId('');
+                            setClientSearch('');
+                          }}
+                          className="w-full p-2.5 hover:bg-teal-500/10 active:bg-teal-500/20 rounded-xl flex items-center justify-between text-right transition-colors border border-transparent hover:border-teal-500/30 group"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-teal-500/15 text-teal-700 dark:text-teal-300 font-bold flex items-center justify-center text-xs overflow-hidden shrink-0">
+                              {c.avatar_url ? (
+                                <img
+                                  src={c.avatar_url}
+                                  alt={c.full_name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                (c.full_name || 'לק').substring(0, 2)
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-xs text-foreground group-hover:text-teal-700 dark:group-hover:text-teal-300 truncate">
+                                {c.full_name}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate">
+                                {c.phone ? `${c.phone}` : c.email || 'לקוח במערכת'}
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-bold text-teal-600 bg-teal-500/10 px-2.5 py-1 rounded-lg shrink-0 group-hover:bg-teal-600 group-hover:text-white transition-colors">
+                            שייך
+                          </span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Client selected options */}
@@ -1019,6 +1155,21 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
           </li>
         </ol>
       </div>
+
+      {/* Quick Add Client Modal */}
+      <ClientModal
+        isOpen={isQuickAddClientOpen}
+        onClose={() => setIsQuickAddClientOpen(false)}
+        onSave={(clientData) => {
+          const newClient = dataStore.addClient({
+            ...clientData,
+            status: clientData.status || 'active',
+            full_name: clientData.full_name || 'לקוח חדש',
+          });
+          setSelectedClientId(newClient.id);
+          setIsQuickAddClientOpen(false);
+        }}
+      />
     </div>
   );
 };
