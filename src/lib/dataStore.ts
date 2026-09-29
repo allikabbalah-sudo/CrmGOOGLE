@@ -400,43 +400,45 @@ class DataStore {
     }
   }
 
-  public async resolveMediaFileUrl(mediaId: string): Promise<string | null> {
-    const existing = (this.state.mediaFiles || []).find((m) => m.id === mediaId);
-    if (existing && existing.url && !existing.url.startsWith('cloud_media:') && !existing.url.startsWith('idb_media:')) {
-      return existing.url;
-    }
+  public async resolveBlobUrl(urlOrBlobId: string): Promise<string | null> {
+    if (!urlOrBlobId) return null;
+    const blobId = urlOrBlobId.replace(/^(cloud_media:|idb_media:)/, '');
 
-    // Check IndexedDB
+    // 1. Check IndexedDB
     try {
-      const fromIdb = await getMediaBlobFromIDB(mediaId);
-      if (fromIdb) {
-        if (existing) {
-          existing.url = fromIdb;
-        }
-        return fromIdb;
-      }
+      const fromIdb = await getMediaBlobFromIDB(blobId);
+      if (fromIdb) return fromIdb;
     } catch {
       // Ignore
     }
 
-    // Check Cloud Firestore
+    // 2. Check Cloud Firestore
     const userId = this.state.currentUserId;
     if (userId) {
       try {
-        const fromCloud = await this.fetchMediaBlobFromCloud(userId, mediaId);
+        const fromCloud = await this.fetchMediaBlobFromCloud(userId, blobId);
         if (fromCloud) {
-          if (existing) {
-            existing.url = fromCloud;
-          }
-          saveMediaBlobToIDB(mediaId, fromCloud).catch(() => {});
+          saveMediaBlobToIDB(blobId, fromCloud).catch(() => {});
           return fromCloud;
         }
       } catch {
         // Ignore
       }
     }
-
     return null;
+  }
+
+  public async resolveMediaFileUrl(mediaId: string): Promise<string | null> {
+    const existing = (this.state.mediaFiles || []).find((m) => m.id === mediaId);
+    if (existing && existing.url && !existing.url.startsWith('cloud_media:') && !existing.url.startsWith('idb_media:')) {
+      return existing.url;
+    }
+
+    const resolved = await this.resolveBlobUrl(mediaId);
+    if (resolved && existing) {
+      existing.url = resolved;
+    }
+    return resolved;
   }
 
   public sanitizeState(state: AppState): AppState {
@@ -512,7 +514,19 @@ class DataStore {
                 return [...cloudArr, ...missingInCloud];
               };
 
-              const finalClients = mergeLocalUnsynced(cloudData.clients, this.state.clients);
+              // Merge client avatars, preserving local high-quality images if cloud has placeholder
+              const rawCloudClients = Array.isArray(cloudData.clients) ? cloudData.clients : [];
+              const mergedClients = rawCloudClients.map((cc) => {
+                if (cc.avatar_url && (cc.avatar_url.startsWith('cloud_media:') || cc.avatar_url.startsWith('idb_media:'))) {
+                  const localMatch = (this.state.clients || []).find((lc) => lc.id === cc.id);
+                  if (localMatch && localMatch.avatar_url && !localMatch.avatar_url.startsWith('cloud_media:') && !localMatch.avatar_url.startsWith('idb_media:')) {
+                    return { ...cc, avatar_url: localMatch.avatar_url };
+                  }
+                }
+                return cc;
+              });
+
+              const finalClients = mergeLocalUnsynced(mergedClients, this.state.clients);
               const finalPrograms = mergeLocalUnsynced(cloudData.programs, this.state.programs);
               const finalSessions = mergeLocalUnsynced(cloudData.sessions, this.state.sessions);
               const finalTasks = mergeLocalUnsynced(cloudData.tasks, this.state.tasks);
@@ -541,6 +555,10 @@ class DataStore {
               this.writeToLocalStorage(this.state);
               this.isSyncingFromCloud = false;
               this.notify();
+
+              // Asynchronously resolve cloud-referenced files and avatars
+              this.resolveCloudMediaFiles(userId, finalMediaFiles).catch(() => {});
+              this.resolveCloudAvatars(userId, finalClients).catch(() => {});
             }
           } else {
             // Cloud state does not exist yet.
@@ -689,16 +707,18 @@ class DataStore {
         return modified ? { ...s, audio_urls: cleanAudioUrls, image_urls: cleanImageUrls } : s;
       });
 
-      // Sanitize clients (offload data/blob avatars)
+      // Sanitize clients (keep preset SVGs and normal avatars <= 65KB embedded directly; only offload massive ones)
       const sanitizedClients = (this.state.clients || []).map((c) => {
-        if (c.avatar_url && (c.avatar_url.startsWith('data:') || c.avatar_url.startsWith('blob:') || c.avatar_url.length > 250)) {
-          const blobId = `avatar_${c.id}`;
-          if (c.avatar_url.startsWith('data:') && !this.syncedMediaBlobIds.has(blobId)) {
-            mediaBlobsToSync.push({ id: blobId, dataUrl: c.avatar_url });
-          }
-          return { ...c, avatar_url: `cloud_media:${blobId}` };
+        if (!c.avatar_url) return c;
+        // Keep preset SVGs and standard sized avatars directly in payload
+        if (c.avatar_url.startsWith('data:image/svg+xml') || c.avatar_url.length <= 65000) {
+          return c;
         }
-        return c;
+        const blobId = `avatar_${c.id}`;
+        if (c.avatar_url.startsWith('data:') && !this.syncedMediaBlobIds.has(blobId)) {
+          mediaBlobsToSync.push({ id: blobId, dataUrl: c.avatar_url });
+        }
+        return { ...c, avatar_url: `cloud_media:${blobId}` };
       });
 
       const payload: any = {
@@ -835,6 +855,25 @@ class DataStore {
         const target = this.state.mediaFiles.find((item) => item.id === m.id);
         if (target) {
           target.url = dataUrl;
+          this.writeToLocalStorage(this.state);
+          this.notify();
+        }
+      }
+    }
+  }
+
+  private async resolveCloudAvatars(userId: string, clients: Client[]) {
+    const unresolved = clients.filter((c) => c.avatar_url && c.avatar_url.startsWith('cloud_media:'));
+    if (unresolved.length === 0) return;
+
+    for (const c of unresolved) {
+      const blobId = c.avatar_url!.replace('cloud_media:', '');
+      const dataUrl = await this.fetchMediaBlobFromCloud(userId, blobId);
+      if (dataUrl) {
+        saveMediaBlobToIDB(blobId, dataUrl).catch(() => {});
+        const target = this.state.clients.find((item) => item.id === c.id);
+        if (target) {
+          target.avatar_url = dataUrl;
           this.writeToLocalStorage(this.state);
           this.notify();
         }

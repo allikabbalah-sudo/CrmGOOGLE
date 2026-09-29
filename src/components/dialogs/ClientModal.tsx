@@ -4,6 +4,7 @@ import { Client, ClientStatus, KABBALAH_READINGS } from '../../types';
 import { useOrganization } from '../../context/OrganizationContext';
 import { cleanEmail } from '../../lib/utils';
 import { compressImageFile } from '../../lib/indexedDbStorage';
+import { ClientAvatar } from '../common/ClientAvatar';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -75,7 +76,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressed = await compressImageFile(file, 400, 400, 0.85);
+      const compressed = await compressImageFile(file, 250, 250, 0.82);
       if (compressed) {
         setAvatarUrl(compressed);
       }
@@ -135,17 +136,11 @@ export const ClientModal: React.FC<ClientModalProps> = ({
             <div className="p-3.5 bg-muted/30 border border-border/80 rounded-2xl space-y-3">
               <div className="flex items-center gap-4">
                 <div className="relative group shrink-0">
-                  {avatarUrl ? (
-                    <img
-                      src={avatarUrl}
-                      alt="אווטר לקוח"
-                      className="w-16 h-16 rounded-full object-cover border-2 border-primary/40 shadow-sm"
-                    />
-                  ) : (
-                    <div className="w-16 h-16 rounded-full bg-primary/15 text-primary font-bold text-xl flex items-center justify-center border-2 border-primary/30">
-                      {fullName.trim() ? fullName.trim().charAt(0) : <User className="w-7 h-7" />}
-                    </div>
-                  )}
+                  <ClientAvatar
+                    avatarUrl={avatarUrl}
+                    name={fullName}
+                    className="w-16 h-16 border-2 border-primary/40 shadow-sm"
+                  />
                   <label
                     htmlFor="avatar-file-modal"
                     className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white cursor-pointer transition-opacity"
@@ -347,19 +342,34 @@ export const ClientModal: React.FC<ClientModalProps> = ({
             </h4>
 
             <div>
-              <label className="block text-xs font-semibold mb-1">סוג הקריאה הקבלית</label>
-              <select
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold">סוג הקריאה הקבלית (טקסט חופשי ללא הגבלת תווים)</label>
+                <span className="text-[10px] text-muted-foreground font-medium">הקלדה חופשית / הצעות</span>
+              </div>
+              <input
+                type="text"
+                placeholder="הקלד סוג קריאה קבלית בטקסט חופשי (למשל: אילן הספירות, עץ החיים, שחרור חסימות...)"
                 value={selectedReading}
                 onChange={(e) => setSelectedReading(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-muted/40 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value="">בחר קריאה נבחרת...</option>
+                className="w-full px-3.5 py-2.5 text-xs bg-muted/40 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary font-medium"
+              />
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-[10px] text-muted-foreground ml-1">הצעות מהירות:</span>
                 {KABBALAH_READINGS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setSelectedReading(r)}
+                    className={`px-2 py-0.5 text-[10px] font-medium rounded-lg border transition-colors ${
+                      selectedReading === r
+                        ? 'bg-primary/20 text-primary border-primary/40 font-bold'
+                        : 'bg-muted/40 hover:bg-muted text-muted-foreground border-border'
+                    }`}
+                  >
+                    + {r}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
 

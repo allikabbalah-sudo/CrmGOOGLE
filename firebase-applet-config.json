@@ -3,9 +3,9 @@
   "appId": "1:30726969736:web:ed2bd3612864f07f9c823d",
   "apiKey": "AIzaSyB6LHEgfLn0Hbwqp5lwbzV5lZD4SOm0GPk",
   "authDomain": "allicrm.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
   "storageBucket": "allicrm.firebasestorage.app",
   "messagingSenderId": "30726969736",
-  "firestoreDatabaseId": "(default)",
   "measurementId": "",
   "oAuthClientId": "30726969736-b2tsqe172itml2i4o86duu22eiakrg5r.apps.googleusercontent.com",
   "recaptchaSiteKey": ""

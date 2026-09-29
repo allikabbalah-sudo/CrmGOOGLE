@@ -20,6 +20,7 @@ import { formatHebrewDate, toWhatsAppUrl } from '../lib/utils';
 import { ClientModal } from '../components/dialogs/ClientModal';
 import { ExportClientsModal } from '../components/dialogs/ExportClientsModal';
 import { compressImageFile } from '../lib/indexedDbStorage';
+import { ClientAvatar } from '../components/common/ClientAvatar';
 
 interface ClientsViewProps {
   onNavigate: (path: string) => void;
@@ -54,7 +55,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
     const file = e.target.files?.[0];
     if (!file || !uploadingClientId) return;
     try {
-      const compressed = await compressImageFile(file, 400, 400, 0.85);
+      const compressed = await compressImageFile(file, 250, 250, 0.82);
       if (compressed) {
         dataStore.updateClient(uploadingClientId, { avatar_url: compressed });
       }
@@ -210,17 +211,11 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ onNavigate }) => {
                   <div className="flex items-start justify-between gap-2 mb-3">
                     <div className="flex items-center gap-3">
                       <div className="relative group/avatar shrink-0">
-                        {client.avatar_url ? (
-                          <img
-                            src={client.avatar_url}
-                            alt={client.full_name}
-                            className="w-10 h-10 rounded-full object-cover border border-primary/30"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-primary/15 text-primary font-bold text-sm flex items-center justify-center border border-primary/30">
-                            {client.full_name ? client.full_name.charAt(0) : 'ל'}
-                          </div>
-                        )}
+                        <ClientAvatar
+                          avatarUrl={client.avatar_url}
+                          name={client.full_name}
+                          className="w-10 h-10 border border-primary/30"
+                        />
                         <button
                           type="button"
                           onClick={(e) => handleCardAvatarClick(client.id, e)}

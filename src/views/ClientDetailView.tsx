@@ -38,6 +38,7 @@ import { LiveReadingModal } from '../components/dialogs/LiveReadingModal';
 import { FileGallery } from '../components/media/FileGallery';
 import { TASK_PRIORITY_LABELS, SESSION_STATUS_LABELS } from '../types';
 import { compressImageFile } from '../lib/indexedDbStorage';
+import { ClientAvatar } from '../components/common/ClientAvatar';
 
 interface ClientDetailViewProps {
   clientId: string;
@@ -154,7 +155,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressed = await compressImageFile(file, 400, 400, 0.85);
+      const compressed = await compressImageFile(file, 250, 250, 0.82);
       if (compressed) {
         dataStore.updateClient(clientId, { avatar_url: compressed });
       }
@@ -274,17 +275,11 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="relative group shrink-0">
-              {client.avatar_url ? (
-                <img
-                  src={client.avatar_url}
-                  alt={client.full_name}
-                  className="w-16 h-16 rounded-full object-cover border-2 border-primary/40 shadow-sm"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-full bg-primary/20 text-primary font-bold text-xl flex items-center justify-center border-2 border-primary/40">
-                  {client.full_name ? client.full_name.charAt(0) : 'ל'}
-                </div>
-              )}
+              <ClientAvatar
+                avatarUrl={client.avatar_url}
+                name={client.full_name}
+                className="w-16 h-16 border-2 border-primary/40 shadow-sm"
+              />
               <label
                 htmlFor="client-detail-avatar-upload"
                 className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white cursor-pointer transition-opacity"
@@ -414,12 +409,23 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
           <div className="lg:col-span-2 space-y-5">
             {/* Kabbalah Reading Card */}
             {client.selected_reading && (
-              <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-2">
-                <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-bold text-xs">
-                  <BookOpen className="w-4 h-4" />
-                  אבחון קבלי נבחר
+              <div className="p-4 bg-amber-500/10 border border-amber-500/25 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-bold text-xs">
+                    <BookOpen className="w-4 h-4" />
+                    סוג קריאה קבלית / אבחון נבחר
+                  </div>
+                  <button
+                    onClick={() => setIsEditClientOpen(true)}
+                    className="text-[11px] text-amber-800 dark:text-amber-300 hover:underline font-semibold flex items-center gap-1"
+                  >
+                    <Edit className="w-3 h-3" />
+                    ערוך פרטי קריאה
+                  </button>
                 </div>
-                <h3 className="font-extrabold text-base text-foreground">{client.selected_reading}</h3>
+                <div className="font-bold text-base text-foreground break-words whitespace-pre-wrap leading-relaxed">
+                  {client.selected_reading}
+                </div>
               </div>
             )}
 

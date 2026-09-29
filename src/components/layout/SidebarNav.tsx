@@ -9,6 +9,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { ClientAvatar } from '../common/ClientAvatar';
 
 interface SidebarNavProps {
   currentPath: string;
@@ -73,17 +74,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ currentPath, onNavigate 
       {/* Footer Profile Box */}
       <div className="p-4 border-t border-white/5 space-y-3">
         <div className="flex items-center gap-3 bg-white/5 p-3 rounded-lg border border-white/5">
-          {profile?.avatar_url ? (
-            <img
-              src={profile.avatar_url}
-              alt={profile?.full_name || ''}
-              className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0"
-            />
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-slate-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-              {profile?.full_name?.charAt(0) || 'מ'}
-            </div>
-          )}
+          <ClientAvatar
+            avatarUrl={profile?.avatar_url}
+            name={profile?.full_name || 'מטפל'}
+            className="w-8 h-8 border border-white/10 shrink-0"
+          />
           <div className="flex-1 overflow-hidden">
             <p className="text-xs font-semibold text-white truncate">{profile?.full_name || 'ישראל ישראלי'}</p>
             <p className="text-[10px] text-slate-500 truncate">מטפל בכיר</p>

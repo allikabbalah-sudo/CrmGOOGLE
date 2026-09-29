@@ -33,7 +33,7 @@ export const ProgramModal: React.FC<ProgramModalProps> = ({
   const { members } = useOrganization();
 
   const [title, setTitle] = useState('');
-  const [totalSessions, setTotalSessions] = useState(10);
+  const [totalSessions, setTotalSessions] = useState(7);
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [weeklyDays, setWeeklyDays] = useState<number[]>([0, 3]); // Default Sun & Wed
   const [timeMode, setTimeMode] = useState<'uniform' | 'per_day'>('uniform');
@@ -47,7 +47,7 @@ export const ProgramModal: React.FC<ProgramModalProps> = ({
   useEffect(() => {
     if (programToEdit) {
       setTitle(programToEdit.title || '');
-      setTotalSessions(programToEdit.total_sessions || 10);
+      setTotalSessions(programToEdit.total_sessions || 7);
       setStartDate(programToEdit.start_date || new Date().toISOString().split('T')[0]);
       setWeeklyDays(programToEdit.weekly_days || [0, 3]);
       setAssignedTo(programToEdit.assigned_to || '');
@@ -66,7 +66,7 @@ export const ProgramModal: React.FC<ProgramModalProps> = ({
       }
     } else {
       setTitle('תוכנית איזון ספירות ותיקון');
-      setTotalSessions(10);
+      setTotalSessions(7);
       setStartDate(new Date().toISOString().split('T')[0]);
       setWeeklyDays([0, 3]);
       setTimeMode('uniform');
@@ -227,21 +227,27 @@ export const ProgramModal: React.FC<ProgramModalProps> = ({
                 onChange={(e) => setTotalSessions(parseInt(e.target.value, 10) || 1)}
                 className="w-full px-3.5 py-2 text-xs bg-muted/40 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary font-bold text-base"
               />
-              {/* Preset buttons */}
-              <div className="flex items-center gap-1.5 mt-2">
-                <span className="text-[10px] text-muted-foreground ml-1">מהיר:</span>
-                {[5, 10, 12, 15, 20].map((num) => (
+              {/* Preset buttons: תוכניות אוטומטיות (1, 7, 9, 21, 49) */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-[10px] text-muted-foreground ml-0.5">תוכנית אוטומטית:</span>
+                {[
+                  { count: 1, label: '1 (אבחון בודד)' },
+                  { count: 7, label: '7 (שבע ספירות)' },
+                  { count: 9, label: '9 (ירחי לידה)' },
+                  { count: 21, label: '21 (איזון עמוק)' },
+                  { count: 49, label: '49 (תיקון שלם)' },
+                ].map(({ count, label }) => (
                   <button
-                    key={num}
+                    key={count}
                     type="button"
-                    onClick={() => setTotalSessions(num)}
+                    onClick={() => setTotalSessions(count)}
                     className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-colors ${
-                      totalSessions === num
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-muted/40 hover:bg-muted text-muted-foreground'
+                      totalSessions === count
+                        ? 'bg-primary text-primary-foreground border-primary shadow-2xs'
+                        : 'bg-muted/40 hover:bg-muted text-muted-foreground border-border'
                     }`}
                   >
-                    {num}
+                    {label}
                   </button>
                 ))}
               </div>

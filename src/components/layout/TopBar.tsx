@@ -20,6 +20,7 @@ import { formatHebrewDate } from '../../lib/utils';
 import { CreateOrgModal } from '../dialogs/CreateOrgModal';
 import { ImportDataModal } from '../dialogs/ImportDataModal';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
+import { ClientAvatar } from '../common/ClientAvatar';
 
 interface TopBarProps {
   onNavigate: (path: string) => void;
@@ -259,17 +260,11 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate }) => {
             }}
             className="flex items-center gap-2 p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
           >
-            {profile?.avatar_url ? (
-              <img
-                src={profile.avatar_url}
-                alt={profile?.full_name || ''}
-                className="w-8 h-8 rounded-full object-cover border border-slate-200"
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs flex items-center justify-center border border-slate-300 dark:border-slate-600">
-                {profile?.full_name?.charAt(0) || 'מ'}
-              </div>
-            )}
+            <ClientAvatar
+              avatarUrl={profile?.avatar_url}
+              name={profile?.full_name || 'מטפל'}
+              className="w-8 h-8 border border-slate-200"
+            />
             <span className="hidden md:inline text-xs font-semibold max-w-[110px] truncate text-slate-700 dark:text-slate-200">
               {profile?.full_name || 'מטפל'}
             </span>

@@ -27,6 +27,7 @@ import { dataStore } from '../lib/dataStore';
 import { formatFileSize, generateUUID } from '../lib/utils';
 import { saveMediaBlobToIDB } from '../lib/indexedDbStorage';
 import { ClientModal } from '../components/dialogs/ClientModal';
+import { ClientAvatar } from '../components/common/ClientAvatar';
 
 interface ShareReceiveViewProps {
   onNavigate: (path: string) => void;
@@ -876,17 +877,11 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
             {selectedClient ? (
               <div className="p-3 bg-teal-500/10 border border-teal-500/30 rounded-2xl flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-full bg-teal-600 text-white font-bold flex items-center justify-center text-xs overflow-hidden shrink-0 shadow-xs">
-                    {selectedClient.avatar_url ? (
-                      <img
-                        src={selectedClient.avatar_url}
-                        alt={selectedClient.full_name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      (selectedClient.full_name || 'לק').substring(0, 2)
-                    )}
-                  </div>
+                  <ClientAvatar
+                    avatarUrl={selectedClient.avatar_url}
+                    name={selectedClient.full_name}
+                    className="w-10 h-10 border border-teal-500/30 shadow-xs"
+                  />
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
@@ -973,17 +968,11 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
                           className="w-full p-2.5 hover:bg-teal-500/10 active:bg-teal-500/20 rounded-xl flex items-center justify-between text-right transition-colors border border-transparent hover:border-teal-500/30 group"
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-full bg-teal-500/15 text-teal-700 dark:text-teal-300 font-bold flex items-center justify-center text-xs overflow-hidden shrink-0">
-                              {c.avatar_url ? (
-                                <img
-                                  src={c.avatar_url}
-                                  alt={c.full_name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                (c.full_name || 'לק').substring(0, 2)
-                              )}
-                            </div>
+                            <ClientAvatar
+                              avatarUrl={c.avatar_url}
+                              name={c.full_name}
+                              className="w-8 h-8 border border-teal-500/20 shadow-2xs"
+                            />
                             <div className="min-w-0">
                               <div className="font-bold text-xs text-foreground group-hover:text-teal-700 dark:group-hover:text-teal-300 truncate">
                                 {c.full_name}

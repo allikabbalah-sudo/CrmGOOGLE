@@ -50,6 +50,7 @@ export const SettingsView: React.FC = () => {
 
   // Push notification state
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = initGoogleCalendarAuth(
@@ -233,17 +234,24 @@ export const SettingsView: React.FC = () => {
           <p className="text-xs text-muted-foreground leading-relaxed">
             כל הנתונים, המטופלים, המפגשים, המשימות וההגדרות מסונכרנים בזמן אמת בענן (Firestore) ומקושרים למזהה המשתמש הייחודי שלך (<strong>{user?.email || user?.id}</strong>). כל שינוי המתבצע במכשיר אחד משתקף מיידית בכל המכשירים והכרטיסיות המחוברות.
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={async () => {
+                setSyncStatusMsg('מסנכרן כעת לענן...');
                 await dataStore.syncStateToCloud();
-                alert('הנתונים סונכרנו בהצלחה לענן!');
+                setSyncStatusMsg('✓ כל הנתונים סונכרנו בהצלחה לענן ב-Firebase!');
+                setTimeout(() => setSyncStatusMsg(null), 5000);
               }}
-              className="py-2 px-4 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20 text-xs font-bold rounded-xl transition-colors flex items-center gap-2"
+              className="py-2 px-4 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 cursor-pointer shadow-2xs"
             >
               <Database className="w-4 h-4" />
               ביצוע סנכרון ידני לענן עכשיו
             </button>
+            {syncStatusMsg && (
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20 animate-in fade-in">
+                {syncStatusMsg}
+              </span>
+            )}
           </div>
         </div>
 
