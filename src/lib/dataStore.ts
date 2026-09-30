@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
+import seedState from './seedState.json';
 import {
   db,
   handleFirestoreError,
@@ -342,6 +343,7 @@ class DataStore {
   private cloudSyncDebounceTimer: any = null;
   private syncedMediaBlobIds: Set<string> = new Set();
   private lastProfileSync: { userId: string; email: string; fullName: string; time: number } | null = null;
+  private hasConfirmedCloudEmpty: boolean = false;
 
   constructor() {
     this.pruneOldStorageKeys();
@@ -353,7 +355,9 @@ class DataStore {
     this.hydrateFromIDB();
     if (this.state.currentUserId) {
       this.initCloudSync(this.state.currentUserId);
-      this.scheduleCloudSync();
+      if ((this.state.clients || []).length > 0) {
+        this.scheduleCloudSync();
+      }
     }
   }
 
@@ -392,6 +396,39 @@ class DataStore {
             if (this.state.currentUserId) {
               this.scheduleCloudSync();
             }
+          }
+        }
+      }
+
+      // 2. If still empty, query cloud fallback documents (e.g. opening fresh on mobile)
+      if (!this.state.clients || this.state.clients.length === 0) {
+        const fallbackDocIds = [
+          this.state.currentUserId,
+          'ee44f38b-8ed3-4e69-8fb6-ccd95911d38e',
+          'usr_YWxsaS5rYWJiYWxhaCU0MGdtYWlsLmNvbQ__',
+          'usr_ZWxpYmVsaXJhbiU0MGdtYWlsLmNvbQ__',
+          'clinic_shared',
+        ].filter(Boolean);
+
+        for (const fId of fallbackDocIds) {
+          try {
+            const snap = await getDoc(doc(db, 'users', fId, 'appData', 'state'));
+            if (snap.exists()) {
+              const cData = snap.data();
+              if (cData && Array.isArray(cData.clients) && cData.clients.length > 0) {
+                this.state = this.sanitizeState({
+                  ...this.state,
+                  ...cData,
+                  currentUserId: this.state.currentUserId || fId,
+                });
+                this.deleteOrgsExceptEliran();
+                this.writeToLocalStorage(this.state);
+                this.notify();
+                break;
+              }
+            }
+          } catch {
+            // Ignore network issues
           }
         }
       }
@@ -612,6 +649,13 @@ class DataStore {
     if (!userId) return;
 
     if (isFirestoreQuotaExceeded() || (this.isQuotaExceeded && Date.now() < this.quotaExceededUntil)) {
+      return;
+    }
+
+    // Protection guard: Do not overwrite existing cloud data with an empty client list
+    // if a fresh mobile device opened before receiving the cloud snapshot.
+    if ((this.state.clients || []).length === 0 && !this.hasConfirmedCloudEmpty) {
+      console.warn('Sync guard: local state has 0 clients and cloud state not verified empty yet. Skipping upload to protect cloud data.');
       return;
     }
 
@@ -921,27 +965,29 @@ class DataStore {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return this.sanitizeState({
-          activeOrgId: parsed.activeOrgId || '',
-          currentUserId: parsed.currentUserId || '',
-          organizations: Array.isArray(parsed.organizations) ? parsed.organizations : [],
-          profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
-          organizationMembers: Array.isArray(parsed.organizationMembers) ? parsed.organizationMembers : [],
-          orgInvites: Array.isArray(parsed.orgInvites) ? parsed.orgInvites : [],
-          pendingApprovals: Array.isArray(parsed.pendingApprovals) ? parsed.pendingApprovals : [],
-          clients: Array.isArray(parsed.clients) ? parsed.clients : [],
-          programs: Array.isArray(parsed.programs) ? parsed.programs : [],
-          sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-          tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
-          notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
-          activityLogs: Array.isArray(parsed.activityLogs) ? parsed.activityLogs : [],
-          mediaFiles: Array.isArray(parsed.mediaFiles) ? parsed.mediaFiles : [],
-        });
+        if (Array.isArray(parsed.clients) && parsed.clients.length > 0) {
+          return this.sanitizeState({
+            activeOrgId: parsed.activeOrgId || '',
+            currentUserId: parsed.currentUserId || '',
+            organizations: Array.isArray(parsed.organizations) ? parsed.organizations : [],
+            profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
+            organizationMembers: Array.isArray(parsed.organizationMembers) ? parsed.organizationMembers : [],
+            orgInvites: Array.isArray(parsed.orgInvites) ? parsed.orgInvites : [],
+            pendingApprovals: Array.isArray(parsed.pendingApprovals) ? parsed.pendingApprovals : [],
+            clients: parsed.clients,
+            programs: Array.isArray(parsed.programs) ? parsed.programs : [],
+            sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+            tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+            notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
+            activityLogs: Array.isArray(parsed.activityLogs) ? parsed.activityLogs : [],
+            mediaFiles: Array.isArray(parsed.mediaFiles) ? parsed.mediaFiles : [],
+          });
+        }
       }
     } catch (e) {
       console.warn('Failed to parse saved state from localStorage, using seed state:', e);
     }
-    return initialAppState;
+    return this.sanitizeState(seedState as any);
   }
 
   private getCleanLocalStorageState(state: AppState): AppState {
@@ -1500,6 +1546,86 @@ class DataStore {
     const filtered = list.filter((c) => !c.organization_id || c.organization_id === orgId);
     if (filtered.length === 0 && list.length > 0) return list;
     return filtered;
+  }
+
+  public getInactiveClients(inactivityDays = 14, orgId = this.state.activeOrgId): {
+    client: Client;
+    daysSinceLastActivity: number;
+    lastActivityDate: string | null;
+    hasActiveProgram: boolean;
+    totalSessions: number;
+    totalPrograms: number;
+    reason: 'no_programs_or_sessions' | 'inactive_period';
+  }[] {
+    const clients = this.getClients(orgId);
+    const now = Date.now();
+    const thresholdMs = inactivityDays * 24 * 60 * 60 * 1000;
+
+    return clients
+      .map((client) => {
+        const clientPrograms = (this.state.programs || []).filter((p) => p.client_id === client.id);
+        const clientSessions = (this.state.sessions || []).filter((s) => s.client_id === client.id);
+
+        // If client has future scheduled sessions, they are already on the calendar and not neglected
+        const futureSessions = clientSessions.filter(
+          (s) => s.session_date && new Date(s.session_date).getTime() > now && s.status !== 'cancelled'
+        );
+        if (futureSessions.length > 0) {
+          return null;
+        }
+
+        const activityTimestamps: number[] = [];
+        clientSessions.forEach((s) => {
+          if (s.session_date) {
+            const t = new Date(s.session_date).getTime();
+            if (!isNaN(t) && t <= now) activityTimestamps.push(t);
+          }
+        });
+        clientPrograms.forEach((p) => {
+          if (p.created_at) {
+            const t = new Date(p.created_at).getTime();
+            if (!isNaN(t) && t <= now) activityTimestamps.push(t);
+          }
+          if (p.start_date) {
+            const t = new Date(p.start_date).getTime();
+            if (!isNaN(t) && t <= now) activityTimestamps.push(t);
+          }
+        });
+
+        if (activityTimestamps.length === 0) {
+          const createdMs = client.created_at ? new Date(client.created_at).getTime() : now;
+          const days = Math.floor((now - createdMs) / (1000 * 60 * 60 * 24));
+          return {
+            client,
+            daysSinceLastActivity: Math.max(0, days),
+            lastActivityDate: client.created_at || null,
+            hasActiveProgram: false,
+            totalSessions: 0,
+            totalPrograms: 0,
+            reason: 'no_programs_or_sessions' as const,
+          };
+        }
+
+        const mostRecent = Math.max(...activityTimestamps);
+        const diffMs = now - mostRecent;
+        const daysSince = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+        if (diffMs >= thresholdMs) {
+          return {
+            client,
+            daysSinceLastActivity: daysSince,
+            lastActivityDate: new Date(mostRecent).toISOString(),
+            hasActiveProgram: clientPrograms.some((p) => p.status === 'active'),
+            totalSessions: clientSessions.length,
+            totalPrograms: clientPrograms.length,
+            reason: 'inactive_period' as const,
+          };
+        }
+
+        return null;
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => b.daysSinceLastActivity - a.daysSinceLastActivity);
   }
 
   public getClientById(id: string): Client | undefined {

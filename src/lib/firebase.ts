@@ -125,8 +125,41 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo));
 }
 
+export interface CloudConnectionStatus {
+  isChecking: boolean;
+  isConnected: boolean;
+  isNotFound: boolean;
+  message: string;
+  projectId: string;
+  databaseId: string;
+}
+
+export const cloudStatus: CloudConnectionStatus = {
+  isChecking: true,
+  isConnected: false,
+  isNotFound: false,
+  message: '',
+  projectId: (firebaseConfig as any).projectId || 'allicrm',
+  databaseId: (firebaseConfig as any).firestoreDatabaseId || '(default)',
+};
+
+const statusListeners = new Set<(status: CloudConnectionStatus) => void>();
+
+export function subscribeToCloudStatus(fn: (status: CloudConnectionStatus) => void): () => void {
+  statusListeners.add(fn);
+  fn({ ...cloudStatus });
+  return () => statusListeners.delete(fn);
+}
+
+function notifyStatusChange() {
+  statusListeners.forEach((fn) => fn({ ...cloudStatus }));
+}
+
 export async function testFirestoreConnection() {
   if (isFirestoreQuotaExceeded()) {
+    cloudStatus.isChecking = false;
+    cloudStatus.message = 'Quota temporarily paused';
+    notifyStatusChange();
     return;
   }
 
@@ -140,12 +173,28 @@ export async function testFirestoreConnection() {
       },
       { merge: true }
     );
+    cloudStatus.isChecking = false;
+    cloudStatus.isConnected = true;
+    cloudStatus.isNotFound = false;
+    cloudStatus.message = 'Connected';
+    notifyStatusChange();
     console.log('Successfully connected to Firestore cloud database.');
   } catch (error) {
+    cloudStatus.isChecking = false;
+    cloudStatus.isConnected = false;
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('does not exist') || msg.includes('NOT_FOUND') || msg.includes('not-found')) {
+      cloudStatus.isNotFound = true;
+      cloudStatus.message = 'Database not created yet in Firebase Console';
+    } else {
+      cloudStatus.message = msg;
+    }
+    notifyStatusChange();
+
     if (isQuotaOrNetworkError(error)) {
       markFirestoreQuotaExceeded(30 * 1000);
     } else {
-      console.warn('Firestore test connection notice:', error instanceof Error ? error.message : error);
+      console.warn('Firestore test connection notice:', msg);
     }
   }
 }

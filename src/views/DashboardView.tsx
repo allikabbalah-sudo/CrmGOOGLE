@@ -30,6 +30,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const clients = dataStore.getClients() || [];
   const tasks = dataStore.getTasks() || [];
   const sessions = dataStore.getSessions() || [];
+  const programs = dataStore.getPrograms() || [];
+
+  // Clients with no activity or program in the last 7-14 days
+  const nowTime = Date.now();
+  const clientsWithoutProgram7Days = clients.filter((c) => {
+    if (!c) return false;
+    const cp = programs.filter((p) => p.client_id === c.id);
+    const cs = sessions.filter((s) => s.client_id === c.id);
+    let latest = 0;
+    for (const p of cp) {
+      const t = Math.max(
+        p.created_at ? new Date(p.created_at).getTime() : 0,
+        p.updated_at ? new Date(p.updated_at).getTime() : 0,
+        p.start_date ? new Date(p.start_date).getTime() : 0
+      );
+      if (t > latest) latest = t;
+    }
+    for (const s of cs) {
+      const t = Math.max(
+        s.session_date ? new Date(s.session_date).getTime() : 0,
+        s.created_at ? new Date(s.created_at).getTime() : 0
+      );
+      if (t > latest) latest = t;
+    }
+    return latest === 0 || nowTime - latest >= 7 * 86400000;
+  }).length;
 
   // Counts
   const activeClientsCount = clients.filter((c) => c?.status === 'active').length;
@@ -95,6 +121,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           + לקוח חדש
         </button>
       </div>
+
+      {/* Alert banner for clients needing follow-up */}
+      {clientsWithoutProgram7Days > 0 && (
+        <div
+          onClick={() => onNavigate('/clients')}
+          className="p-4 bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-card border border-amber-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:border-amber-500/50 transition-all shadow-xs"
+        >
+          <div className="flex items-center gap-3 text-amber-900 dark:text-amber-200">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
+              <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            </div>
+            <div>
+              <p className="font-bold text-xs sm:text-sm text-foreground">
+                ישנם {clientsWithoutProgram7Days} לקוחות ללא תוכנית עבודה פעילה בשבוע/שבועיים האחרונים
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                לחץ כאן למעבר לכרטיסיית הלקוחות ללא פעילות, שליחת הודעת WhatsApp או פתיחת תוכנית עבודה חדשה
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs shrink-0 self-end sm:self-auto"
+          >
+            <span>צפה בלקוחות</span>
+            <ArrowLeft className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* 4 Clickable KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
