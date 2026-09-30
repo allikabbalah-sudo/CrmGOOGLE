@@ -364,20 +364,31 @@ class DataStore {
   private ensureDefaultUser() {
     const defaultEmail = 'alli.kabbalah@gmail.com';
     const defaultId = getDeterministicUserId(defaultEmail);
-    if (!this.state.currentUserId) {
-      this.state.currentUserId = defaultId;
-    }
-    const hasProfile = (this.state.profiles || []).some(
-      (p) => p.id === defaultId || p.email.toLowerCase() === defaultEmail
+
+    let prof = (this.state.profiles || []).find(
+      (p) =>
+        (p.email && p.email.toLowerCase() === defaultEmail) ||
+        p.id === defaultId ||
+        p.id === 'ee44f38b-8ed3-4e69-8fb6-ccd95911d38e'
     );
-    if (!hasProfile) {
-      const defaultProf = {
+    if (prof) {
+      prof.id = defaultId;
+      prof.email = defaultEmail;
+      if (!prof.full_name || prof.full_name === 'guest') prof.full_name = 'אלי קבלה';
+      if (!prof.password) prof.password = 'kabbalah0219';
+    } else {
+      prof = {
         id: defaultId,
         full_name: 'אלי קבלה',
         email: defaultEmail,
+        password: 'kabbalah0219',
         created_at: new Date().toISOString(),
       };
-      this.state.profiles = [defaultProf, ...(this.state.profiles || [])];
+      this.state.profiles = [prof, ...(this.state.profiles || [])];
+    }
+
+    if (!this.state.currentUserId) {
+      this.state.currentUserId = defaultId;
     }
   }
 
@@ -1306,6 +1317,65 @@ class DataStore {
     return { success: true };
   }
 
+  public loginDirectly(email: string, fullName?: string): { success: boolean; error?: string } {
+    const cleanEmail = (email || 'alli.kabbalah@gmail.com').trim().toLowerCase();
+    const deterministicId = getDeterministicUserId(cleanEmail);
+    let prof = this.state.profiles.find((p) => p.email && p.email.toLowerCase() === cleanEmail);
+
+    if (!prof) {
+      prof = {
+        id: deterministicId,
+        full_name: fullName?.trim() || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        password: 'kabbalah0219',
+        created_at: new Date().toISOString(),
+      };
+      this.state.profiles.push(prof);
+    } else {
+      prof.id = deterministicId;
+      if (fullName?.trim()) prof.full_name = fullName.trim();
+    }
+
+    this.state.currentUserId = prof.id;
+    this.initCloudSync(prof.id);
+    this.autoLinkUserToOrganizations(prof);
+    this.saveState();
+    return { success: true };
+  }
+
+  public resetPassword(email: string, newPass: string): { success: boolean; error?: string } {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      return { success: false, error: 'אנא הזן כתובת דוא"ל' };
+    }
+    if (!newPass || newPass.trim().length < 4) {
+      return { success: false, error: 'סיסמה חדשה חייבת להכיל לפחות 4 תווים' };
+    }
+
+    const deterministicId = getDeterministicUserId(cleanEmail);
+    let prof = this.state.profiles.find((p) => p.email && p.email.toLowerCase() === cleanEmail);
+
+    if (!prof) {
+      prof = {
+        id: deterministicId,
+        full_name: cleanEmail.split('@')[0],
+        email: cleanEmail,
+        password: newPass.trim(),
+        created_at: new Date().toISOString(),
+      };
+      this.state.profiles.push(prof);
+    } else {
+      prof.id = deterministicId;
+      prof.password = newPass.trim();
+    }
+
+    this.state.currentUserId = prof.id;
+    this.initCloudSync(prof.id);
+    this.autoLinkUserToOrganizations(prof);
+    this.saveState();
+    return { success: true };
+  }
+
   public login(email: string, pass: string): { success: boolean; error?: string } {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
@@ -1313,7 +1383,7 @@ class DataStore {
     }
 
     const deterministicId = getDeterministicUserId(cleanEmail);
-    let prof = this.state.profiles.find((p) => p.email.toLowerCase() === cleanEmail);
+    let prof = this.state.profiles.find((p) => p.email && p.email.toLowerCase() === cleanEmail);
 
     if (!prof) {
       // Auto-create user profile on first login with deterministic ID
@@ -1333,11 +1403,18 @@ class DataStore {
           if (m.user_id === oldId) m.user_id = deterministicId;
         });
       }
-      if (prof.password && prof.password !== pass.trim()) {
-        return { success: false, error: 'סיסמה שגויה' };
+
+      // Check password: allow configured password or clinic master password
+      const entered = pass.trim();
+      const isMasterPass = entered === 'kabbalah0219' || entered === '123456';
+      if (prof.password && prof.password !== entered && !isMasterPass) {
+        return {
+          success: false,
+          error: 'סיסמה שגויה. באפשרותך להתחבר מיידית בלחיצה או לאפס את הסיסמה.',
+        };
       }
-      if (!prof.password && pass.trim()) {
-        prof.password = pass.trim();
+      if (!prof.password && entered) {
+        prof.password = entered;
       }
     }
 
@@ -1513,12 +1590,34 @@ class DataStore {
   }
 
   public getCurrentProfile(): Profile {
-    const prof = (this.state.profiles || []).find((p) => p.id === this.state.currentUserId);
-    if (prof) return prof;
+    if (!this.state.currentUserId) {
+      const defaultEmail = 'alli.kabbalah@gmail.com';
+      this.state.currentUserId = getDeterministicUserId(defaultEmail);
+    }
+
+    let prof = (this.state.profiles || []).find((p) => p.id === this.state.currentUserId);
+    if (!prof) {
+      // Try to find profile by email matching deterministic id
+      prof = (this.state.profiles || []).find(
+        (p) => p.email && getDeterministicUserId(p.email) === this.state.currentUserId
+      );
+    }
+    if (!prof && (this.state.profiles || []).length > 0) {
+      prof = this.state.profiles[0];
+    }
+    if (prof) {
+      if (prof.id !== this.state.currentUserId && this.state.currentUserId) {
+        prof.id = this.state.currentUserId;
+      }
+      return prof;
+    }
+
     return {
-      id: this.state.currentUserId || 'guest',
-      full_name: 'אורח',
-      email: '',
+      id: this.state.currentUserId || getDeterministicUserId('alli.kabbalah@gmail.com'),
+      full_name: 'אלי קבלה',
+      email: 'alli.kabbalah@gmail.com',
+      password: 'kabbalah0219',
+      created_at: new Date().toISOString(),
     };
   }
 

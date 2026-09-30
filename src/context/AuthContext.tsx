@@ -9,6 +9,8 @@ interface AuthContextType {
   login: (email: string, pass: string) => { success: boolean; error?: string };
   register: (email: string, pass: string, fullName: string) => { success: boolean; error?: string };
   loginWithGoogle: (email: string, fullName?: string) => { success: boolean; error?: string };
+  loginDirectly: (email: string, fullName?: string) => { success: boolean; error?: string };
+  resetPassword: (email: string, newPass: string) => { success: boolean; error?: string };
   signOut: () => void;
   createOrganization: (name: string) => void;
 }
@@ -20,6 +22,8 @@ const AuthContext = createContext<AuthContextType>({
   login: () => ({ success: false }),
   register: () => ({ success: false }),
   loginWithGoogle: () => ({ success: false }),
+  loginDirectly: () => ({ success: false }),
+  resetPassword: () => ({ success: false }),
   signOut: () => {},
   createOrganization: () => {},
 });
@@ -78,6 +82,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return res;
   };
 
+  const loginDirectly = (email: string, fullName?: string) => {
+    const res = dataStore.loginDirectly(email, fullName);
+    if (res.success) {
+      refreshState();
+    }
+    return res;
+  };
+
+  const resetPassword = (email: string, newPass: string) => {
+    const res = dataStore.resetPassword(email, newPass);
+    if (res.success) {
+      refreshState();
+    }
+    return res;
+  };
+
   const signOut = () => {
     dataStore.logout();
     setUser(null);
@@ -98,6 +118,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         loginWithGoogle,
+        loginDirectly,
+        resetPassword,
         signOut,
         createOrganization,
       }}
