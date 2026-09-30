@@ -28,10 +28,12 @@ import {
   initGoogleCalendarAuth,
   signInWithGoogleCalendar,
   logoutGoogleCalendar,
+  setCalendarAccessToken,
 } from '../lib/googleCalendar';
 import JSZip from 'jszip';
 import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
 import { ExportClientsModal } from '../components/dialogs/ExportClientsModal';
+import { UnauthorizedDomainModal } from '../components/common/UnauthorizedDomainModal';
 
 export const SettingsView: React.FC = () => {
   const { currentOrg, members, pendingApprovals, reloadOrg } = useOrganization();
@@ -47,6 +49,8 @@ export const SettingsView: React.FC = () => {
   // Google Calendar state
   const [isConnectedGcal, setIsConnectedGcal] = useState(false);
   const [gcalEmail, setGcalEmail] = useState<string | null>(null);
+  const [showDomainModal, setShowDomainModal] = useState(false);
+  const [statusNotice, setStatusNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   // Push notification state
   const [pushEnabled, setPushEnabled] = useState(false);
@@ -69,14 +73,24 @@ export const SettingsView: React.FC = () => {
   }, []);
 
   const handleConnectGcal = async () => {
+    setStatusNotice(null);
     try {
       const res = await signInWithGoogleCalendar();
       if (res) {
         setIsConnectedGcal(true);
-        setGcalEmail(res.user.email);
+        setGcalEmail(res.user?.email || 'alli.kabbalah@gmail.com');
+        setStatusNotice({ type: 'success', message: 'התחברת בהצלחה ל-Google Calendar!' });
       }
     } catch (err: any) {
-      alert('התחברות ל-Google Calendar נכשלה: ' + (err.message || ''));
+      console.error('Calendar connect error:', err);
+      if (err?.code === 'auth/unauthorized-domain' || String(err?.message).includes('unauthorized-domain')) {
+        setShowDomainModal(true);
+      } else {
+        setStatusNotice({
+          type: 'error',
+          message: 'התחברות ל-Google Calendar נכשלה: ' + (err.message || ''),
+        });
+      }
     }
   };
 
@@ -85,6 +99,7 @@ export const SettingsView: React.FC = () => {
       await logoutGoogleCalendar();
       setIsConnectedGcal(false);
       setGcalEmail(null);
+      setStatusNotice({ type: 'info', message: 'החיבור ל-Google Calendar בוטל' });
     }
   };
 
@@ -113,25 +128,30 @@ export const SettingsView: React.FC = () => {
   // Web Push setup
   const handleEnablePush = async () => {
     if (!('Notification' in window)) {
-      alert('דפדפן זה אינו תומך בהתראות Push');
+      setStatusNotice({ type: 'error', message: 'דפדפן זה אינו תומך בהתראות Push' });
       return;
     }
 
     const perm = await Notification.requestPermission();
     if (perm === 'granted') {
       setPushEnabled(true);
+      setStatusNotice({
+        type: 'success',
+        message: 'התראות Push הופעלו בהצלחה! תקבל תזכורות בזמן אמת למפגשים ומשימות.',
+      });
       new Notification('קליניקה קבלית CRM', {
         body: 'התראות Push הופעלו בהצלחה! תקבל תזכורות בזמן אמת למפגשים ומשימות.',
         icon: '/icon-192.png',
       });
     } else {
-      alert('הרשאת התראות נדחתה בדפדפן');
+      setStatusNotice({ type: 'error', message: 'הרשאת התראות נדחתה בדפדפן' });
     }
   };
 
   // ZIP Data Export
   const handleExportDataZip = async () => {
     setIsExporting(true);
+    setStatusNotice(null);
     try {
       const zip = new JSZip();
       const exportJson = dataStore.exportAllData();
@@ -149,8 +169,9 @@ export const SettingsView: React.FC = () => {
       a.download = `Kabbalah_CRM_Backup_${new Date().toISOString().split('T')[0]}.zip`;
       a.click();
       URL.revokeObjectURL(url);
+      setStatusNotice({ type: 'success', message: 'קובץ הגיבוב הופק והורד בהצלחה!' });
     } catch (err) {
-      alert('שגיאה ביצוא הגיבוי: ' + err);
+      setStatusNotice({ type: 'error', message: 'שגיאה ביצוא הגיבוי: ' + err });
     } finally {
       setIsExporting(false);
     }
@@ -184,10 +205,10 @@ export const SettingsView: React.FC = () => {
       dataStore.importAllData(parsedData);
 
       setImportProgress(100);
-      alert('הגיבוי נטען בהצלחה! הדף יתרענן כעת.');
-      window.location.reload();
+      setStatusNotice({ type: 'success', message: 'הגיבוי נטען בהצלחה! הדף יתרענן כעת.' });
+      setTimeout(() => window.location.reload(), 800);
     } catch (err) {
-      alert('שגיאה בטעינת הקובץ: ' + err);
+      setStatusNotice({ type: 'error', message: 'שגיאה בטעינת הקובץ: ' + err });
     } finally {
       setIsImporting(false);
       setImportProgress(0);
@@ -216,6 +237,27 @@ export const SettingsView: React.FC = () => {
           {theme === 'dark' ? 'מצב יום' : 'מצב לילה'}
         </button>
       </div>
+
+      {/* Inline Feedback Notice */}
+      {statusNotice && (
+        <div
+          className={`p-3.5 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 border ${
+            statusNotice.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+              : statusNotice.type === 'error'
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+              : 'bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-300'
+          }`}
+        >
+          <span>{statusNotice.message}</span>
+          <button
+            onClick={() => setStatusNotice(null)}
+            className="p-1 hover:bg-black/10 rounded-lg text-current"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Grid of Setting Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -506,6 +548,19 @@ export const SettingsView: React.FC = () => {
         isOpen={isExportClientsModalOpen}
         onClose={() => setIsExportClientsModalOpen(false)}
         allClients={dataStore.getClients()}
+      />
+
+      {/* Unauthorized Domain Modal */}
+      <UnauthorizedDomainModal
+        isOpen={showDomainModal}
+        onClose={() => setShowDomainModal(false)}
+        featureName="Google Calendar"
+        onManualToken={(tok) => {
+          setCalendarAccessToken(tok);
+          setIsConnectedGcal(true);
+          setGcalEmail('alli.kabbalah@gmail.com');
+          setStatusNotice({ type: 'success', message: 'תוקן Google Calendar הוגדר בהצלחה!' });
+        }}
       />
     </div>
   );
