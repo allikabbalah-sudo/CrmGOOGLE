@@ -33,6 +33,12 @@ import {
 import JSZip from 'jszip';
 import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
 import { ExportClientsModal } from '../components/dialogs/ExportClientsModal';
+import {
+  requestNotificationPermission,
+  sendDeviceNotification,
+  getNotificationPermission,
+  isNotificationSupported,
+} from '../lib/deviceNotifications';
 import { UnauthorizedDomainModal } from '../components/common/UnauthorizedDomainModal';
 
 export const SettingsView: React.FC = () => {
@@ -127,24 +133,34 @@ export const SettingsView: React.FC = () => {
 
   // Web Push setup
   const handleEnablePush = async () => {
-    if (!('Notification' in window)) {
-      setStatusNotice({ type: 'error', message: 'דפדפן זה אינו תומך בהתראות Push' });
+    if (!isNotificationSupported()) {
+      setStatusNotice({ type: 'error', message: 'דפדפן זה אינו תומך בהתראות מכשיר' });
       return;
     }
 
-    const perm = await Notification.requestPermission();
-    if (perm === 'granted') {
+    const granted = await requestNotificationPermission();
+    if (granted) {
       setPushEnabled(true);
       setStatusNotice({
         type: 'success',
-        message: 'התראות Push הופעלו בהצלחה! תקבל תזכורות בזמן אמת למפגשים ומשימות.',
-      });
-      new Notification('קליניקה קבלית CRM', {
-        body: 'התראות Push הופעלו בהצלחה! תקבל תזכורות בזמן אמת למפגשים ומשימות.',
-        icon: '/icon-192.png',
+        message: 'התראות הופעלו בהצלחה! תקבל תזכורות בזמן אמת למפגשים ומשימות ישירות למכשיר.',
       });
     } else {
-      setStatusNotice({ type: 'error', message: 'הרשאת התראות נדחתה בדפדפן' });
+      setStatusNotice({ type: 'error', message: 'הרשאת התראות נדחתה או נחסמה בהגדרות הדפדפן' });
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    if (!isNotificationSupported()) return;
+    const sent = await sendDeviceNotification('בדיקת התראה מקליניקה קבלית 🔔', {
+      body: 'ההתראות מוגדרות ופועלות בהצלחה במכשירך!',
+      url: '/settings',
+      sound: true,
+    });
+    if (sent) {
+      setStatusNotice({ type: 'success', message: 'התראת בדיקה נשלחה כעת למכשירך!' });
+    } else {
+      setStatusNotice({ type: 'error', message: 'לא ניתן לשלוח התראה. ודא שההרשאות מאושרות בדפדפן.' });
     }
   };
 
@@ -347,20 +363,40 @@ export const SettingsView: React.FC = () => {
 
         {/* Web Push Notifications Card */}
         <div className="bg-card border border-border rounded-2xl p-5 shadow-xs space-y-3">
-          <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold text-sm">
-            <Bell className="w-5 h-5" />
-            התראות Push בדפדפן
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold text-sm">
+              <Bell className="w-5 h-5" />
+              התראות במכשיר (Push)
+            </div>
+            {pushEnabled && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                פעיל ✓
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            קבל תזכורות בזמן אמת למפגשים קרובים, משימות לביצוע ועדכוני קליניקה.
+            קבל תזכורות בזמן אמת למפגשים קרובים, משימות לביצוע ועדכוני קליניקה ישירות למסך הטלפון או המחשב.
           </p>
-          <button
-            onClick={handleEnablePush}
-            disabled={pushEnabled}
-            className="w-full py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 text-xs font-bold rounded-xl border border-amber-500/30 transition-colors disabled:opacity-50"
-          >
-            {pushEnabled ? '✓ התראות Push מופעלות' : 'הפעל התראות Push כעת'}
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            {!pushEnabled ? (
+              <button
+                type="button"
+                onClick={handleEnablePush}
+                className="flex-1 py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 text-xs font-bold rounded-xl border border-amber-500/30 transition-colors cursor-pointer"
+              >
+                הפעל התראות מכשיר כעת
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSendTestNotification}
+                className="flex-1 py-2 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold rounded-xl border border-primary/20 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                שלח התראת בדיקה למכשיר
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Privacy Policy & Terms Card */}

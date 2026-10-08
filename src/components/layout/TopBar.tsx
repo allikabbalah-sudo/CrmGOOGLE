@@ -11,12 +11,19 @@ import {
   CheckCheck,
   Plus,
   FileArchive,
+  Smartphone,
 } from 'lucide-react';
 import { useOrganization } from '../../context/OrganizationContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { dataStore } from '../../lib/dataStore';
 import { formatHebrewDate } from '../../lib/utils';
+import {
+  isNotificationSupported,
+  getNotificationPermission,
+  requestNotificationPermission,
+  sendDeviceNotification,
+} from '../../lib/deviceNotifications';
 import { CreateOrgModal } from '../dialogs/CreateOrgModal';
 import { ImportDataModal } from '../dialogs/ImportDataModal';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
@@ -207,6 +214,44 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate }) => {
                   </button>
                 )}
               </div>
+
+              {/* Native Device Notification Status & Prompt */}
+              {isNotificationSupported() && (
+                <div className="px-3 py-2 bg-muted/40 border-b border-border/80 text-[11px] flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Smartphone className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <span className="truncate">
+                      {getNotificationPermission() === 'granted'
+                        ? 'התראות במכשיר פעילות 🔔'
+                        : 'התראות במכשיר כבויות'}
+                    </span>
+                  </div>
+                  {getNotificationPermission() === 'granted' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sendDeviceNotification('בדיקת התראה 🔔', {
+                          body: 'מערכת קליניקה קבלית מחוברת למכשירך בהצלחה!',
+                          sound: true,
+                        });
+                      }}
+                      className="px-2 py-0.5 bg-card hover:bg-card/80 border border-border text-[10px] font-bold rounded shadow-2xs text-foreground shrink-0"
+                    >
+                      בדיקה
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await requestNotificationPermission();
+                      }}
+                      className="px-2 py-0.5 bg-primary text-primary-foreground text-[10px] font-bold rounded shadow-2xs hover:bg-primary/90 shrink-0"
+                    >
+                      הפעל כעת
+                    </button>
+                  )}
+                </div>
+              )}
 
               <div className="max-h-72 overflow-y-auto divide-y divide-border/60">
                 {notifications.length === 0 ? (

@@ -258,15 +258,28 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
     return msg;
   };
 
-  const handleWhatsAppDirect = () => {
+  const getWhatsAppUrl = () => {
     const msg = getWhatsAppMessage();
     const encoded = encodeURIComponent(msg);
-
     if (associatedClient?.phone) {
       const cleanPhone = formatWhatsAppPhone(associatedClient.phone);
-      window.open(`https://wa.me/${cleanPhone}?text=${encoded}`, '_blank');
-    } else {
-      window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+      return `https://wa.me/${cleanPhone}?text=${encoded}`;
+    }
+    return `https://api.whatsapp.com/send?text=${encoded}`;
+  };
+
+  const handleWhatsAppDirect = () => {
+    const url = getWhatsAppUrl();
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {
+      window.location.href = url;
     }
     showToast('וואטסאפ נפתח לשיתוף 💬');
   };
@@ -275,10 +288,13 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
     // 1. Download file
     await handleDownload();
 
-    // 2. Open WhatsApp
+    // 2. Also copy message so user can paste immediately
+    await handleCopyDetails();
+
+    // 3. Open WhatsApp link safely
     setTimeout(() => {
       handleWhatsAppDirect();
-    }, 600);
+    }, 400);
   };
 
   const handleCopyDetails = async () => {
@@ -287,10 +303,7 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
       if (file.drive_view_link) {
         textToCopy = file.drive_view_link;
       } else {
-        textToCopy = `קובץ: ${file.name} (${formatFileSize(file.size)})\nנוצר: ${formatHebrewDate(file.created_at, 'dd/MM/yyyy HH:mm')}`;
-        if (associatedClient) {
-          textToCopy += `\nלקוח: ${associatedClient.full_name}`;
-        }
+        textToCopy = getWhatsAppMessage();
       }
 
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -298,6 +311,8 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
       } else {
         const textarea = document.createElement('textarea');
         textarea.value = textToCopy;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
@@ -305,7 +320,7 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
       }
 
       setCopied(true);
-      showToast('הפרטים הועתקו ללוח בהצלחה! ✨');
+      showToast('הטקסט והפרטים הועתקו ללוח בהצלחה! ✨');
       setTimeout(() => setCopied(false), 2500);
     } catch (e) {
       console.warn('Clipboard copy failed:', e);
@@ -448,21 +463,28 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
+                    type="button"
                     onClick={handleDownloadAndWhatsApp}
-                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg flex items-center gap-1 shadow-xs transition-colors"
-                    title="מוריד את הקובץ ופותח את וואטסאפ לצירוף קל"
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                    title="מוריד את הקובץ ומכין את וואטסאפ לצירוף קל"
                   >
                     <Download className="w-3.5 h-3.5" />
                     הורד ושלח
                   </button>
-                  <button
-                    onClick={handleWhatsAppDirect}
-                    className="px-2.5 py-1.5 bg-card hover:bg-muted text-emerald-700 dark:text-emerald-400 border border-emerald-500/40 text-xs font-medium rounded-lg transition-colors"
+                  <a
+                    href={getWhatsAppUrl()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      showToast('וואטסאפ נפתח לשיתוף 💬');
+                    }}
+                    className="px-2.5 py-1.5 bg-card hover:bg-muted text-emerald-700 dark:text-emerald-400 border border-emerald-500/40 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                   >
-                    פתח הודעה
-                  </button>
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    פתח וואטסאפ
+                  </a>
                 </div>
               </div>
             </div>

@@ -140,18 +140,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
   };
 
   const handleDisconnectGoogle = async () => {
-    if (window.confirm('האם תרצה לנתק את החיבור ל-Google Calendar?')) {
-      await logoutGoogleCalendar();
-      setIsConnectedGcal(false);
-      setGcalUserEmail(null);
-      setGcalEvents([]);
-    }
+    await logoutGoogleCalendar();
+    setIsConnectedGcal(false);
+    setGcalUserEmail(null);
+    setGcalEvents([]);
+    setSyncStatusMsg('החיבור ל-Google Calendar נותק');
+    setTimeout(() => setSyncStatusMsg(null), 3500);
   };
 
   // Perform sync single session to Google Calendar
   const executeSyncSession = async (session: Session, clientName: string) => {
     setConfirmSyncSession(null);
     setIsLoadingGcal(true);
+    setGcalError(null);
     try {
       const startDate = new Date(session.session_date);
       const endDate = addHours(startDate, 1); // 1 hour session
@@ -167,7 +168,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
       setTimeout(() => setSyncStatusMsg(null), 4000);
       loadGoogleEvents();
     } catch (err: any) {
-      alert('שגיאה בסנכרון ל-Google Calendar: ' + (err.message || ''));
+      setGcalError('שגיאה בסנכרון ל-Google Calendar: ' + (err.message || ''));
     } finally {
       setIsLoadingGcal(false);
     }
@@ -177,6 +178,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
   const executeBulkSyncMonth = async () => {
     setConfirmSyncMonth(false);
     setIsLoadingGcal(true);
+    setGcalError(null);
 
     const monthStart = startOfMonth(currentMonth);
     const monthEnd = endOfMonth(monthStart);
@@ -206,7 +208,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
       setTimeout(() => setSyncStatusMsg(null), 5000);
       loadGoogleEvents();
     } catch (err: any) {
-      alert(`סונכרנו ${successCount} מפגשים לפני שארעה שגיאה: ` + (err.message || ''));
+      setGcalError(`סונכרנו ${successCount} מפגשים לפני שארעה שגיאה: ` + (err.message || ''));
     } finally {
       setIsLoadingGcal(false);
     }
@@ -216,13 +218,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
   const executeDeleteGcalEvent = async (event: GoogleCalendarEvent) => {
     setConfirmDeleteGcalEvent(null);
     setIsLoadingGcal(true);
+    setGcalError(null);
     try {
       await deleteGoogleCalendarEvent(event.id);
       setSyncStatusMsg(`האירוע "${event.summary}" הוסר מ-Google Calendar`);
       setTimeout(() => setSyncStatusMsg(null), 4000);
       loadGoogleEvents();
     } catch (err: any) {
-      alert('שגיאה במחיקת אירוע: ' + (err.message || ''));
+      setGcalError('שגיאה במחיקת אירוע: ' + (err.message || ''));
     } finally {
       setIsLoadingGcal(false);
     }
@@ -243,6 +246,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
     if (selectedClientId !== 'all' && t.client_id !== selectedClientId) return false;
     return t.status === 'todo' && t.due_date;
   });
+
+  const getGcalWebLink = (session: Session, clientName: string) => {
+    const start = session.session_date ? new Date(session.session_date) : new Date();
+    const end = addHours(start, 1);
+    const fmt = (d: Date) => d.toISOString().replace(/-|:|\.\d\d\d/g, '');
+    const title = encodeURIComponent(`מפגש טיפולי — ${clientName}`);
+    const details = encodeURIComponent(session.notes ? `מפגש טיפולי בקליניקה.\nהערות: ${session.notes}` : 'מפגש טיפולי בקליניקה קבלית');
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${fmt(start)}/${fmt(end)}&details=${details}`;
+  };
 
   // Calendar Math
   const monthStart = startOfMonth(currentMonth);
@@ -609,12 +621,24 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNavigate }) => {
                               setConfirmSyncSession({ session: s, clientName });
                             }
                           }}
-                          title="סנכרן ל-Google Calendar"
+                          title="סנכרן ל-Google Calendar דרך חשבון מחובר"
                           className="px-2 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded hover:bg-blue-500/20 transition-all flex items-center gap-1"
                         >
                           <RefreshCw className="w-3 h-3" />
-                          Google Calendar
+                          סנכרן
                         </button>
+
+                        {/* Direct Google Calendar Web Link */}
+                        <a
+                          href={getGcalWebLink(s, clientName)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="פתח והוסף ישירות ב-Google Calendar Web"
+                          className="px-2 py-1 bg-muted hover:bg-muted/80 border border-border text-foreground text-[10px] font-bold rounded transition-all flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3 text-primary" />
+                          יומן Google
+                        </a>
                       </div>
                     </div>
                   );

@@ -59,7 +59,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
 
   const [activeTab, setActiveTab] = useState<'general' | 'clinical' | 'media'>(initialTab);
   const [callNoteInput, setCallNoteInput] = useState('');
-  const [sessionSortOrder, setSessionSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [sessionSortOrder, setSessionSortOrder] = useState<'desc' | 'asc'>('asc');
   const [clinicalSubView, setClinicalSubView] = useState<'programs' | 'timeline'>('programs');
   const [, setStoreTick] = useState(0);
 
@@ -586,11 +586,27 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
 
       {/* TAB 2: CLINICAL (PROGRAMS & TASKS) */}
       {activeTab === 'clinical' && (() => {
-        // Sort sessions based on user preference (default: newest at top, oldest at bottom)
+        // Sort sessions based on user preference
         const sortedSessions = [...sessions].sort((a, b) => {
           const timeA = a.session_date ? new Date(a.session_date).getTime() : 0;
           const timeB = b.session_date ? new Date(b.session_date).getTime() : 0;
-          return sessionSortOrder === 'desc' ? timeB - timeA : timeA - timeB;
+          return sessionSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+        });
+
+        // Programs sorted: newest program at the top (e.g. 10.10 before 1.10)
+        const sortedPrograms = [...programs].sort((a, b) => {
+          const getProgTime = (p: Program) => {
+            if (p.start_date) {
+              const t = new Date(p.start_date).getTime();
+              if (!isNaN(t)) return t;
+            }
+            if (p.created_at) {
+              const t = new Date(p.created_at).getTime();
+              if (!isNaN(t)) return t;
+            }
+            return 0;
+          };
+          return getProgTime(b) - getProgTime(a);
         });
 
         const standaloneSessions = sortedSessions.filter(
@@ -612,7 +628,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {completedCount} בוצעו • {scheduledCount} מתוכננים • {sessionSortOrder === 'desc' ? 'ממוין מהעדכני ביותר (למעלה) לישן ביותר (למטה)' : 'ממוין מהישן ביותר (למעלה) לעדכני ביותר (למטה)'}
+                  {completedCount} בוצעו • {scheduledCount} מתוכננים • {sessionSortOrder === 'asc' ? 'ממוין לפי סדר מפגשים: מפגש 1 ראשון (למעלה) עד אחרון (למטה)' : 'ממוין מהעדכני ביותר (למעלה) לישן ביותר (למטה)'}
                 </p>
               </div>
 
@@ -647,13 +663,13 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                 {/* Sort Order Toggle */}
                 <button
                   type="button"
-                  onClick={() => setSessionSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+                  onClick={() => setSessionSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
                   className="px-3 py-2 bg-card hover:bg-muted text-foreground border border-border text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5"
                   title="החלף כיוון מיון"
                 >
                   <ArrowDownUp className="w-3.5 h-3.5 text-primary" />
                   <span>
-                    {sessionSortOrder === 'desc' ? 'סדר: עדכני למעלה' : 'סדר: ישן למעלה'}
+                    {sessionSortOrder === 'asc' ? 'סדר: מפגש 1 למעלה' : 'סדר: עדכני למעלה'}
                   </span>
                 </button>
 
@@ -707,7 +723,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                   </div>
                 ) : (
                   <>
-                    {programs.map((prog) => {
+                    {sortedPrograms.map((prog) => {
                       const rawProgSessions = sessions.filter((s) => s.program_id === prog.id);
                       const progCompleted = rawProgSessions.filter((s) => s.status === 'completed').length;
                       const progMediaFiles = dataStore.getMediaFiles(prog.id);
@@ -721,11 +737,11 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                         return idx >= 0 ? idx + 1 : 1;
                       };
 
-                      // Sessions sorted: newest at top, oldest at bottom (or as toggled)
+                      // Sessions sorted: Option A (Session #1 at top, Session #9 at bottom when sessionSortOrder === 'asc')
                       const progSessions = [...rawProgSessions].sort((a, b) => {
                         const timeA = a.session_date ? new Date(a.session_date).getTime() : 0;
                         const timeB = b.session_date ? new Date(b.session_date).getTime() : 0;
-                        return sessionSortOrder === 'desc' ? timeB - timeA : timeA - timeB;
+                        return sessionSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
                       });
 
                       return (
@@ -739,7 +755,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                                 </span>
                               </div>
                               <p className="text-xs text-muted-foreground mt-0.5">
-                                ימי טיפול: {(prog.weekly_days || []).map((d) => ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'][d]).join(', ')} • {sessionSortOrder === 'desc' ? 'מפגשים מסודרים מהעדכני ביותר (למעלה) לישן ביותר (למטה)' : 'מפגשים מסודרים מהישן ביותר (למעלה) לעדכני ביותר (למטה)'}
+                                ימי טיפול: {(prog.weekly_days || []).map((d) => ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'][d]).join(', ')} • {sessionSortOrder === 'asc' ? 'מפגשים מסודרים לפי סדר: מפגש 1 ראשון (למעלה) עד אחרון (למטה)' : 'מפגשים מסודרים מהעדכני ביותר (למעלה) לישן ביותר (למטה)'}
                               </p>
                             </div>
 
@@ -774,15 +790,15 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                             </div>
                           </div>
 
-                          {/* Sessions Grid (Newest at top, Oldest at bottom) */}
+                          {/* Sessions Grid (Option A: Session #1 first at top, Session #9 at bottom) */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                             {progSessions.map((s, idx) => {
                               const stInfo = SESSION_STATUS_LABELS[s.status] || {
                                 label: s.status || 'מתוכנן',
                                 class: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800',
                               };
-                              const isLatest = sessionSortOrder === 'desc' && idx === 0;
-                              const isOldest = sessionSortOrder === 'desc' && idx === progSessions.length - 1 && progSessions.length > 1;
+                              const isFirst = sessionSortOrder === 'asc' ? idx === 0 : idx === progSessions.length - 1 && progSessions.length > 1;
+                              const isLast = sessionSortOrder === 'asc' ? idx === progSessions.length - 1 && progSessions.length > 1 : idx === 0;
 
                               return (
                                 <div
@@ -792,20 +808,20 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                                     setIsSessionDialogOpen(true);
                                   }}
                                   className={`p-3.5 bg-muted/30 hover:bg-muted border rounded-xl cursor-pointer transition-all space-y-2 relative group ${
-                                    isLatest ? 'border-primary/50 shadow-xs ring-1 ring-primary/20' : 'border-border/80'
+                                    isFirst ? 'border-primary/50 shadow-xs ring-1 ring-primary/20' : 'border-border/80'
                                   }`}
                                 >
                                   <div className="flex items-center justify-between gap-1.5 flex-wrap">
                                     <div className="flex items-center gap-1.5">
                                       <span className="font-bold text-xs">מפגש #{getProgSessionNumber(s.id)}</span>
-                                      {isLatest && (
+                                      {isFirst && (
                                         <span className="px-1.5 py-0.5 text-[9px] font-bold bg-primary text-primary-foreground rounded-md shadow-2xs">
-                                          העדכני ביותר
+                                          מפגש ראשון
                                         </span>
                                       )}
-                                      {isOldest && (
+                                      {isLast && (
                                         <span className="px-1.5 py-0.5 text-[9px] font-medium bg-muted text-muted-foreground border border-border/60 rounded-md">
-                                          הישן ביותר
+                                          מפגש אחרון
                                         </span>
                                       )}
                                     </div>
@@ -979,7 +995,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                   <div>
                     <h4 className="font-bold text-sm text-foreground">ציר כל המפגשים הטיפוליים של הלקוח</h4>
                     <p className="text-xs text-muted-foreground">
-                      ריכוז מלא של כל המפגשים — {sessionSortOrder === 'desc' ? 'מהעדכני ביותר (למעלה) לישן ביותר (למטה)' : 'מהישן ביותר (למעלה) לעדכני ביותר (למטה)'}
+                      ריכוז מלא של כל המפגשים — {sessionSortOrder === 'asc' ? 'ממפגש ראשון (למעלה) עד אחרון (למטה)' : 'מהעדכני ביותר (למעלה) לישן ביותר (למטה)'}
                     </p>
                   </div>
                   <span className="text-xs font-bold text-primary px-3 py-1 bg-primary/10 rounded-xl">
@@ -995,8 +1011,8 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                   <div className="relative border-r-2 border-primary/30 mr-3 pr-5 space-y-4 py-2">
                     {sortedSessions.map((s, idx) => {
                       const prog = programs.find((p) => p.id === s.program_id);
-                      const isLatest = sessionSortOrder === 'desc' && idx === 0;
-                      const isOldest = sessionSortOrder === 'desc' && idx === sortedSessions.length - 1 && sortedSessions.length > 1;
+                      const isFirst = sessionSortOrder === 'asc' ? idx === 0 : idx === sortedSessions.length - 1 && sortedSessions.length > 1;
+                      const isLast = sessionSortOrder === 'asc' ? idx === sortedSessions.length - 1 && sortedSessions.length > 1 : idx === 0;
                       const stInfo = SESSION_STATUS_LABELS[s.status] || {
                         label: s.status || 'מתוכנן',
                         class: 'bg-blue-500/10 text-blue-600 border-blue-200',
@@ -1007,7 +1023,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                           {/* Timeline Dot */}
                           <div
                             className={`absolute -right-[27px] top-3.5 w-3.5 h-3.5 rounded-full border-2 border-background ${
-                              isLatest ? 'bg-primary ring-4 ring-primary/20' : 'bg-muted-foreground'
+                              isFirst ? 'bg-primary ring-4 ring-primary/20' : 'bg-muted-foreground'
                             }`}
                           />
 
@@ -1017,7 +1033,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                               setIsSessionDialogOpen(true);
                             }}
                             className={`p-4 bg-muted/30 hover:bg-muted border rounded-xl cursor-pointer transition-all space-y-2.5 ${
-                              isLatest ? 'border-primary/50 shadow-xs ring-1 ring-primary/20' : 'border-border/80'
+                              isFirst ? 'border-primary/50 shadow-xs ring-1 ring-primary/20' : 'border-border/80'
                             }`}
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1025,14 +1041,14 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                                 <span className="font-bold text-xs text-foreground">
                                   {prog ? prog.title : 'מפגש טיפולי'}
                                 </span>
-                                {isLatest && (
+                                {isFirst && (
                                   <span className="px-2 py-0.5 text-[9px] font-bold bg-primary text-primary-foreground rounded-md shadow-2xs">
-                                    העדכני ביותר
+                                    מפגש ראשון
                                   </span>
                                 )}
-                                {isOldest && (
+                                {isLast && (
                                   <span className="px-2 py-0.5 text-[9px] font-medium bg-muted text-muted-foreground border border-border/60 rounded-md">
-                                    הישן ביותר
+                                    מפגש אחרון
                                   </span>
                                 )}
                               </div>

@@ -17,6 +17,7 @@ import {
   saveStateBackupToIDB,
   getStateBackupFromIDB,
 } from './indexedDbStorage';
+import { sendDeviceNotification } from './deviceNotifications';
 import {
   Client,
   Program,
@@ -2149,6 +2150,15 @@ class DataStore {
     };
     this.state.notifications.unshift(newNotif);
     this.saveState();
+
+    // Send real OS / device notification if permission is granted
+    sendDeviceNotification(newNotif.title, {
+      body: newNotif.body,
+      url: newNotif.link,
+      tag: newNotif.id,
+      sound: true,
+    }).catch(() => {});
+
     return newNotif;
   }
 

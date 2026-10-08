@@ -59,6 +59,7 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
   const [transferModalFile, setTransferModalFile] = useState<MediaFile | null>(null);
   const [shareModalFile, setShareModalFile] = useState<MediaFile | null>(null);
   const [justUploadedNotice, setJustUploadedNotice] = useState<string | null>(null);
+  const [justUploadedFile, setJustUploadedFile] = useState<MediaFile | null>(null);
 
   const prevMediaCount = React.useRef(mediaFiles?.length || 0);
 
@@ -69,7 +70,11 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
       const newestFile = mediaFiles[0];
       if (newestFile) {
         setJustUploadedNotice(newestFile.name);
-        const timer = setTimeout(() => setJustUploadedNotice(null), 7000);
+        setJustUploadedFile(newestFile);
+        const timer = setTimeout(() => {
+          setJustUploadedNotice(null);
+          setJustUploadedFile(null);
+        }, 12000);
         return () => clearTimeout(timer);
       }
     }
@@ -149,11 +154,12 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
           </div>
           {mediaFiles.length > 0 && (
             <button
+              type="button"
               onClick={() => {
-                const target = mediaFiles.find((m) => m.name === justUploadedNotice) || mediaFiles[0];
-                setShareModalFile(target);
+                const target = justUploadedFile || mediaFiles.find((m) => m.name === justUploadedNotice) || mediaFiles[0];
+                if (target) setShareModalFile(target);
               }}
-              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg shrink-0 flex items-center gap-1 transition-colors shadow-xs"
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg shrink-0 flex items-center gap-1.5 transition-colors shadow-xs text-xs cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" />
               שתף עכשיו

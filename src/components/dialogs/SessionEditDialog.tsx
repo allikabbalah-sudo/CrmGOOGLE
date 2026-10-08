@@ -24,6 +24,7 @@ export const SessionEditDialog: React.FC<SessionEditDialogProps> = ({
   const [sessionTime, setSessionTime] = useState('');
   const [notes, setNotes] = useState('');
   const [showRecorder, setShowRecorder] = useState(false);
+  const [audioNotice, setAudioNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (session) {
@@ -33,6 +34,7 @@ export const SessionEditDialog: React.FC<SessionEditDialogProps> = ({
       setSessionDate(parts[0] || '');
       setSessionTime(parts[1] ? parts[1].substring(0, 5) : '10:00');
       setNotes(session.notes || '');
+      setAudioNotice(null);
     }
   }, [session, isOpen]);
 
@@ -155,14 +157,21 @@ export const SessionEditDialog: React.FC<SessionEditDialogProps> = ({
             </button>
 
             {showRecorder && (
-              <div className="mt-2">
+              <div className="mt-2 space-y-2">
                 <AudioRecorder
                   onRecordingComplete={(file) => {
-                    alert(`ההקלטה ${file.name} נשמרה בהצלחה במדיה של הלקוח!`);
+                    setAudioNotice(`ההקלטה "${file.name}" נשמרה בהצלחה במדיית הלקוח!`);
                     setShowRecorder(false);
+                    setTimeout(() => setAudioNotice(null), 5000);
                   }}
                   onCancel={() => setShowRecorder(false)}
                 />
+              </div>
+            )}
+
+            {audioNotice && (
+              <div className="mt-2 p-2.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs rounded-xl font-medium">
+                {audioNotice}
               </div>
             )}
           </div>

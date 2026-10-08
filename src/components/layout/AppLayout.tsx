@@ -17,6 +17,30 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
     const interval = setInterval(() => {
       const now = new Date();
       const tasks = dataStore.getTasks();
+      const sessions = dataStore.getSessions();
+
+      // Check upcoming sessions (1 hour reminder)
+      sessions.forEach((s) => {
+        if (s.status === 'scheduled' && s.session_date) {
+          const sessDate = new Date(s.session_date);
+          const diffMs = sessDate.getTime() - now.getTime();
+          const diffMins = Math.floor(diffMs / 60000);
+
+          if (diffMins > 0 && diffMins <= 60 && !s.reminder_sent_at) {
+            dataStore.updateSession(s.id, { reminder_sent_at: new Date().toISOString() });
+            const client = dataStore.getClientById(s.client_id);
+            const clientName = client ? client.full_name : 'לקוח';
+            const hours = String(sessDate.getHours()).padStart(2, '0');
+            const mins = String(sessDate.getMinutes()).padStart(2, '0');
+            dataStore.addNotification({
+              type: 'session_reminder',
+              title: `תזכורת: מפגש בעוד ${diffMins} דקות!`,
+              body: `מפגש טיפולי עם ${clientName} נקבע לשעה ${hours}:${mins}`,
+              link: `/clients/${s.client_id}?tab=clinical`,
+            });
+          }
+        }
+      });
 
       tasks.forEach((t) => {
         if (t.status === 'todo' && t.due_date) {

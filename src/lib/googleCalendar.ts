@@ -98,7 +98,7 @@ export const signInWithGoogleCalendar = async (): Promise<{ user: { email?: stri
   try {
     isSigningIn = true;
 
-    // 1. Try Firebase signInWithPopup
+    // 1. Try Firebase signInWithPopup first
     try {
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
@@ -109,39 +109,41 @@ export const signInWithGoogleCalendar = async (): Promise<{ user: { email?: stri
         return { user: { email: result.user.email || undefined }, accessToken: cachedAccessToken };
       }
     } catch (firebaseErr: any) {
-      console.warn('Firebase signInWithPopup failed:', firebaseErr);
-
-      // If domain is unauthorized in Firebase (e.g. crmgoogle.vercel.app), try Google Identity Services client directly
-      if (
-        firebaseErr?.code === 'auth/unauthorized-domain' ||
-        String(firebaseErr?.message).includes('unauthorized-domain')
-      ) {
-        try {
-          const gisToken = await requestGisOAuthToken([
-            'https://www.googleapis.com/auth/calendar',
-            'https://www.googleapis.com/auth/calendar.events',
-          ]);
-          if (gisToken) {
-            cachedAccessToken = gisToken;
-            sessionStorage.setItem('gcal_access_token', cachedAccessToken);
-            const userInfo = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: { Authorization: `Bearer ${gisToken}` },
-            })
-              .then((r) => r.json())
-              .catch(() => ({}));
-            const email = userInfo.email || 'alli.kabbalah@gmail.com';
-            sessionStorage.setItem('gcal_user_email', email);
-            return { user: { email }, accessToken: cachedAccessToken };
-          }
-        } catch (gisErr) {
-          console.warn('GIS fallback also failed:', gisErr);
-        }
-      }
-
-      throw firebaseErr;
+      console.warn('Firebase signInWithPopup failed, falling back to GIS OAuth:', firebaseErr);
     }
 
-    throw new Error('לא ניתן לקבל Access Token מ-Google Auth');
+    // 2. Always fallback to Google Identity Services (GIS) client directly
+    try {
+      const gisToken = await requestGisOAuthToken([
+        'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/calendar.events',
+      ]);
+      if (gisToken) {
+        cachedAccessToken = gisToken;
+        sessionStorage.setItem('gcal_access_token', cachedAccessToken);
+        const userInfo = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${gisToken}` },
+        })
+          .then((r) => r.json())
+          .catch(() => ({}));
+        const email = userInfo.email || 'alli.kabbalah@gmail.com';
+        sessionStorage.setItem('gcal_user_email', email);
+        return { user: { email }, accessToken: cachedAccessToken };
+      }
+    } catch (gisErr: any) {
+      console.warn('GIS OAuth client failed:', gisErr);
+      const errMsg = String(gisErr?.message || gisErr || '');
+      if (errMsg.includes('popup_closed') || errMsg.includes('closed_by_user')) {
+        throw new Error('חלון ההתחברות של Google נסגר לפני השלמת האישור.');
+      } else if (errMsg.includes('popup_blocked') || errMsg.includes('blocked')) {
+        throw new Error('הדפדפן חסם את החלון הקופץ של Google. אנא אפשר חלונות קופצים בדפדפן ונסה שוב.');
+      } else if (errMsg.includes('access_denied')) {
+        throw new Error('לא אושרה גישה ליומן Google. נדרש אישור הרשאות כדי לסנכרן מפגשים.');
+      }
+      throw new Error(`שגיאה בחיבור ל-Google: ${errMsg}`);
+    }
+
+    throw new Error('לא התקבל תוקן גישה מ-Google');
   } finally {
     isSigningIn = false;
   }

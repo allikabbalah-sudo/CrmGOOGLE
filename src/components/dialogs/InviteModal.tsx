@@ -15,12 +15,14 @@ export const InviteModal: React.FC<InviteModalProps> = ({ isOpen, onClose }) => 
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
   if (!isOpen) return null;
 
   const handleDirectAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) return;
+    setErrorMsg('');
 
     try {
       dataStore.addMemberDirect(email.trim(), fullName.trim(), role);
@@ -28,7 +30,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({ isOpen, onClose }) => 
       setEmail('');
       setFullName('');
     } catch (err: any) {
-      alert(err.message || 'אירעה שגיאה בהוספת המשתמש');
+      setErrorMsg(err.message || 'אירעה שגיאה בהוספת המשתמש');
     }
   };
 
@@ -104,6 +106,12 @@ export const InviteModal: React.FC<InviteModalProps> = ({ isOpen, onClose }) => 
           {successMsg && (
             <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold rounded-xl text-center">
               {successMsg}
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold rounded-xl text-center">
+              {errorMsg}
             </div>
           )}
 

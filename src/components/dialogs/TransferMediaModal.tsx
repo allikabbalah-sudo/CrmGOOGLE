@@ -19,12 +19,14 @@ export const TransferMediaModal: React.FC<TransferMediaModalProps> = ({
   const [transferType, setTransferType] = useState<'general' | 'client' | 'program'>('client');
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [selectedProgramId, setSelectedProgramId] = useState<string>('');
+  const [errorMsg, setErrorMsg] = useState<string>('');
 
   const [clients, setClients] = useState<Client[]>([]);
   const [programs, setPrograms] = useState<Program[]>([]);
 
   useEffect(() => {
     if (isOpen) {
+      setErrorMsg('');
       const allClients = dataStore.getClients();
       setClients(allClients);
 
@@ -62,17 +64,18 @@ export const TransferMediaModal: React.FC<TransferMediaModalProps> = ({
   if (!isOpen || !file) return null;
 
   const handleSave = () => {
+    setErrorMsg('');
     if (transferType === 'general') {
       dataStore.transferMediaFile(file.id, 'general', 'general');
     } else if (transferType === 'client') {
       if (!selectedClientId) {
-        alert('אנא בחר לקוח');
+        setErrorMsg('אנא בחר לקוח');
         return;
       }
       dataStore.transferMediaFile(file.id, selectedClientId, 'client');
     } else if (transferType === 'program') {
       if (!selectedProgramId) {
-        alert('אנא בחר תוכנית טיפול');
+        setErrorMsg('אנא בחר תוכנית טיפול');
         return;
       }
       dataStore.transferMediaFile(file.id, selectedProgramId, 'program');
@@ -102,6 +105,12 @@ export const TransferMediaModal: React.FC<TransferMediaModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {errorMsg && (
+          <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold rounded-xl text-center">
+            {errorMsg}
+          </div>
+        )}
 
         {/* Transfer Destination Type */}
         <div className="space-y-2">
