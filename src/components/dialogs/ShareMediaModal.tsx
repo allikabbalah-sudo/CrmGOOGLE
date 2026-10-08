@@ -51,6 +51,47 @@ function dataUrlToBlob(dataUrl: string, fallbackMime = 'application/octet-stream
 }
 
 /**
+ * Converts any resolved URL (data:, blob:, http:) into a real File object for native file sharing
+ */
+async function getMediaFileObject(file: MediaFile, resolvedUrl: string | null): Promise<File | null> {
+  try {
+    let url = resolvedUrl || file.url;
+    if (!url || url.startsWith('cloud_media:') || url.startsWith('idb_media:')) {
+      const fetched = await dataStore.resolveMediaFileUrl(file.id);
+      if (fetched) url = fetched;
+    }
+    if (!url) return null;
+
+    let mime = file.type === 'audio' ? 'audio/mpeg' : 'image/jpeg';
+    const lowerName = (file.name || '').toLowerCase();
+    if (lowerName.endsWith('.png')) mime = 'image/png';
+    else if (lowerName.endsWith('.webp')) mime = 'image/webp';
+    else if (lowerName.endsWith('.gif')) mime = 'image/gif';
+    else if (lowerName.endsWith('.wav')) mime = 'audio/wav';
+    else if (lowerName.endsWith('.ogg')) mime = 'audio/ogg';
+    else if (lowerName.endsWith('.mp3')) mime = 'audio/mpeg';
+    else if (lowerName.endsWith('.m4a')) mime = 'audio/mp4';
+    else if (lowerName.endsWith('.pdf')) mime = 'application/pdf';
+
+    let blob: Blob;
+    if (url.startsWith('data:')) {
+      blob = dataUrlToBlob(url, mime);
+    } else {
+      const res = await fetch(url);
+      blob = await res.blob();
+    }
+
+    return new File([blob], file.name, {
+      type: blob.type || mime,
+      lastModified: new Date(file.created_at).getTime() || Date.now(),
+    });
+  } catch (err) {
+    console.warn('Failed to obtain File object:', err);
+    return null;
+  }
+}
+
+/**
  * Cleans an Israeli/International phone number for WhatsApp links
  */
 function formatWhatsAppPhone(phone: string): string {
@@ -74,6 +115,7 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
   const [associatedClient, setAssociatedClient] = useState<Client | null>(null);
 
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
@@ -140,7 +182,7 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
     setToastMsg(msg);
     setTimeout(() => {
       setToastMsg((cur) => (cur === msg ? null : cur));
-    }, 3500);
+    }, 4000);
   };
 
   const handleDownload = async () => {
@@ -184,78 +226,52 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
     }
   };
 
-  const handleNativeShare = async () => {
-    let url = resolvedUrl || file.url;
-    if (!url || url.startsWith('cloud_media:') || url.startsWith('idb_media:')) {
-      const fetched = await dataStore.resolveMediaFileUrl(file.id);
-      if (fetched) url = fetched;
-    }
-
-    if (typeof navigator === 'undefined' || !navigator.share) {
-      // Fallback: Copy and prompt
-      handleCopyDetails();
-      showToast('שיתוף ישיר אינו נתמך בדפדפן זה. פרטי הקובץ הועתקו ללוח');
-      return;
-    }
-
+  /**
+   * Shares the ACTUAL FILE binary (never as a link!) using Web Share API
+   */
+  const handleShareAsFile = async () => {
+    setIsSharing(true);
     try {
-      let fileObj: File | null = null;
-      if (url && url.startsWith('data:')) {
-        const mime = file.type === 'audio' ? 'audio/mpeg' : 'image/jpeg';
-        const blob = dataUrlToBlob(url, mime);
-        fileObj = new File([blob], file.name, {
-          type: blob.type || mime,
-        });
+      const fileObj = await getMediaFileObject(file, resolvedUrl);
+      if (!fileObj) {
+        showToast('שגיאה בהכנת הקובץ לשיתוף');
+        await handleDownload();
+        return;
       }
 
-      // Try sharing actual file binary first if browser supports it
-      if (fileObj && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
+      // Check if browser Web Share API supports file sharing directly (mobile devices, WhatsApp, Telegram, etc.)
+      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
         await navigator.share({
           files: [fileObj],
           title: file.name,
-          text: `קובץ מדיה מ-Kabbalah CRM: ${file.name}`,
         });
-        showToast('הקובץ שותף בהצלחה!');
+        showToast('הקובץ שותף בהצלחה כקובץ! 📁');
         return;
       }
 
-      // If Google Drive link exists and is an HTTP URL, share it
-      if (file.drive_view_link && file.drive_view_link.startsWith('http')) {
-        await navigator.share({
-          title: file.name,
-          text: `קובץ מדיה מ-Kabbalah CRM: ${file.name}`,
-          url: file.drive_view_link,
-        });
-        showToast('הקישור שותף בהצלחה!');
-        return;
-      }
-
-      // Otherwise share text description
-      await navigator.share({
-        title: file.name,
-        text: `קובץ מדיה מ-Kabbalah CRM: ${file.name} (${file.type === 'audio' ? 'הקלטת שמע' : 'תמונה'})`,
-      });
-      showToast('הפרטים שותפו בהצלחה!');
+      // If Web Share API with files is not supported (Desktop PC / browser without file sharing)
+      // Download the file immediately so the user has the actual file in hand
+      await handleDownload();
+      showToast('הקובץ הורד למכשירך כקובץ! כעת ניתן לצרף אותו (📎) בכל צ׳אט או מייל 📥');
     } catch (err: any) {
       if (err?.name === 'AbortError') {
-        // User cancelled share dialogue, do nothing
+        // User closed share dialog
         return;
       }
-      console.warn('Native share failed:', err);
-      // Fallback to copy
-      handleCopyDetails();
+      console.warn('Native file share failed:', err);
+      // Fallback: download file
+      await handleDownload();
+    } finally {
+      setIsSharing(false);
     }
   };
 
+  /**
+   * WhatsApp text strictly contains NO links — only polite text
+   */
   const getWhatsAppMessage = () => {
     const clientName = associatedClient?.full_name ? ` ${associatedClient.full_name}` : '';
-    let msg = `שלום${clientName},\nמצורף קובץ מתוך מערכת Kabbalah CRM:\n📄 *${file.name}*`;
-
-    if (file.drive_view_link) {
-      msg += `\n\n🔗 קישור לצפייה ב-Google Drive:\n${file.drive_view_link}`;
-    }
-
-    return msg;
+    return `שלום${clientName},\nמצורף קובץ מתוך מערכת הקליניקה:\n📄 *${file.name}*`;
   };
 
   const getWhatsAppUrl = () => {
@@ -281,30 +297,47 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
     } catch {
       window.location.href = url;
     }
-    showToast('וואטסאפ נפתח לשיתוף 💬');
   };
 
-  const handleDownloadAndWhatsApp = async () => {
-    // 1. Download file
-    await handleDownload();
+  /**
+   * Send via WhatsApp as a file:
+   * First tries direct file share if mobile browser supports sharing files to WhatsApp;
+   * Otherwise downloads the file and immediately opens WhatsApp chat to attach!
+   */
+  const handleSendToWhatsAppAsFile = async () => {
+    setIsSharing(true);
+    try {
+      const fileObj = await getMediaFileObject(file, resolvedUrl);
+      if (fileObj && typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
+        await navigator.share({
+          files: [fileObj],
+          title: file.name,
+        });
+        showToast('הקובץ נשלח כקובץ! 📁');
+        return;
+      }
 
-    // 2. Also copy message so user can paste immediately
-    await handleCopyDetails();
+      // Otherwise: 1. Download file to device
+      await handleDownload();
 
-    // 3. Open WhatsApp link safely
-    setTimeout(() => {
+      // 2. Open WhatsApp chat with client
+      setTimeout(() => {
+        handleWhatsAppDirect();
+      }, 500);
+
+      showToast('הקובץ הורד למכשירך! גרור אותו לוואטסאפ או לחץ על 📎 לצירוף כקובץ');
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      await handleDownload();
       handleWhatsAppDirect();
-    }, 400);
+    } finally {
+      setIsSharing(false);
+    }
   };
 
   const handleCopyDetails = async () => {
     try {
-      let textToCopy = '';
-      if (file.drive_view_link) {
-        textToCopy = file.drive_view_link;
-      } else {
-        textToCopy = getWhatsAppMessage();
-      }
+      const textToCopy = getWhatsAppMessage();
 
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(textToCopy);
@@ -320,7 +353,7 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
       }
 
       setCopied(true);
-      showToast('הטקסט והפרטים הועתקו ללוח בהצלחה! ✨');
+      showToast('שם ופרטי הקובץ הועתקו ללוח בהצלחה! ✨');
       setTimeout(() => setCopied(false), 2500);
     } catch (e) {
       console.warn('Clipboard copy failed:', e);
@@ -329,7 +362,7 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
   };
 
   const handleEmailShare = () => {
-    const subject = encodeURIComponent(`קובץ מ-Kabbalah CRM: ${file.name}`);
+    const subject = encodeURIComponent(`קובץ מהקליניקה: ${file.name}`);
     const body = encodeURIComponent(getWhatsAppMessage());
     const targetEmail = associatedClient?.email || '';
     window.location.href = `mailto:${targetEmail}?subject=${subject}&body=${body}`;
@@ -360,13 +393,13 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
               <Share2 className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-foreground">שיתוף קובץ מדיה</h3>
-              <p className="text-xs text-muted-foreground">שתף בוואטסאפ, במכשיר, בהורדה או במייל</p>
+              <h3 className="text-base font-bold text-foreground">שיתוף קובץ מדיה כקובץ</h3>
+              <p className="text-xs text-muted-foreground">שליחת הקובץ עצמו (שמע/תמונה) ולא כקישור</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -420,7 +453,7 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
             {file.type === 'audio' && resolvedUrl && (
               <button
                 onClick={toggleAudio}
-                className="p-2.5 rounded-full bg-purple-600 hover:bg-purple-700 text-white transition-colors shadow-xs"
+                className="p-2.5 rounded-full bg-purple-600 hover:bg-purple-700 text-white transition-colors shadow-xs cursor-pointer"
                 title={isPlaying ? 'עצור' : 'השמע'}
               >
                 {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current mr-0.5" />}
@@ -438,27 +471,53 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
             />
           )}
 
-          {/* Primary Share Options */}
+          {/* Primary Share Options - File Oriented */}
           <div className="space-y-2.5">
-            <p className="text-xs font-semibold text-muted-foreground px-0.5">אפשרויות שיתוף מהירות</p>
+            <p className="text-xs font-semibold text-muted-foreground px-0.5">אפשרויות שיתוף כקובץ</p>
 
-            {/* 1. Direct WhatsApp Option */}
-            <div className="bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 transition-colors">
+            {/* 1. HERO ACTION: Direct Native File Share (Mobile / Tablet / Modern Browser) */}
+            <button
+              type="button"
+              onClick={handleShareAsFile}
+              disabled={isSharing}
+              className="w-full p-3.5 bg-primary/10 hover:bg-primary/20 border-2 border-primary/40 hover:border-primary rounded-xl flex items-center justify-between text-right transition-all group shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-primary text-primary-foreground group-hover:scale-105 transition-transform">
+                  <Share2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h5 className="font-bold text-sm text-foreground">שתף קובץ ישירות (WhatsApp / אפליקציות)</h5>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary text-primary-foreground">
+                      מומלץ
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    מעביר את הקובץ עצמו (שמע/תמונה) ישירות לאפליקציה הנבחרת — ללא שום קישור!
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs text-primary font-bold px-3 py-1.5 rounded-lg bg-primary/15 group-hover:bg-primary group-hover:text-primary-foreground transition-colors shrink-0">
+                {isSharing ? 'מכין...' : 'שתף קובץ'}
+              </span>
+            </button>
+
+            {/* 2. Direct WhatsApp as File */}
+            <div className="bg-emerald-500/10 hover:bg-emerald-500/15 border border-emerald-500/35 rounded-xl p-3 transition-colors">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-lg bg-emerald-600 text-white">
+                  <div className="p-2 rounded-lg bg-emerald-600 text-white shrink-0">
                     <MessageCircle className="w-4 h-4" />
                   </div>
                   <div>
                     <h5 className="font-semibold text-xs text-foreground">
                       {associatedClient?.phone
-                        ? `שליחה ישירה ל-${associatedClient.full_name} בוואטסאפ`
-                        : 'שיתוף בוואטסאפ (WhatsApp)'}
+                        ? `שליחה בוואטסאפ ל-${associatedClient.full_name} כקובץ`
+                        : 'שליחה בוואטסאפ כקובץ'}
                     </h5>
                     <p className="text-[11px] text-muted-foreground">
-                      {associatedClient?.phone
-                        ? `מספר: ${associatedClient.phone}`
-                        : 'פותח את וואטסאפ עם כותרת והודעה מוכנה'}
+                      מוריד את הקובץ ופותח את השיחה בוואטסאפ לצירוף ישיר (📎) כקובץ
                     </p>
                   </div>
                 </div>
@@ -466,52 +525,23 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
-                    onClick={handleDownloadAndWhatsApp}
-                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
-                    title="מוריד את הקובץ ומכין את וואטסאפ לצירוף קל"
+                    onClick={handleSendToWhatsAppAsFile}
+                    disabled={isSharing}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                    title="שליחת הקובץ כקובץ בוואטסאפ"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    הורד ושלח
+                    שלח בוואטסאפ
                   </button>
-                  <a
-                    href={getWhatsAppUrl()}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => {
-                      showToast('וואטסאפ נפתח לשיתוף 💬');
-                    }}
-                    className="px-2.5 py-1.5 bg-card hover:bg-muted text-emerald-700 dark:text-emerald-400 border border-emerald-500/40 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5" />
-                    פתח וואטסאפ
-                  </a>
                 </div>
               </div>
             </div>
 
-            {/* 2. Native System Share (Mobile / Desktop) */}
-            <button
-              onClick={handleNativeShare}
-              className="w-full p-3 bg-card hover:bg-muted/60 border border-border rounded-xl flex items-center justify-between text-right transition-colors group"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                  <Share2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h5 className="font-semibold text-xs text-foreground">שיתוף מהיר במכשיר (תפריט הטלפון/מחשב)</h5>
-                  <p className="text-[11px] text-muted-foreground">
-                    שיתוף לאפליקציות מותקנות: WhatsApp, Telegram, AirDrop, כונן ועוד
-                  </p>
-                </div>
-              </div>
-              <span className="text-xs text-blue-600 font-medium px-2 py-1 rounded bg-blue-500/10">שתף</span>
-            </button>
-
             {/* 3. Direct File Download */}
             <button
+              type="button"
               onClick={handleDownload}
-              className="w-full p-3 bg-card hover:bg-muted/60 border border-border rounded-xl flex items-center justify-between text-right transition-colors group"
+              className="w-full p-3 bg-card hover:bg-muted/60 border border-border rounded-xl flex items-center justify-between text-right transition-colors group cursor-pointer"
             >
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-purple-500/10 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
@@ -520,51 +550,27 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
                 <div>
                   <h5 className="font-semibold text-xs text-foreground">הורדת הקובץ למכשיר</h5>
                   <p className="text-[11px] text-muted-foreground">
-                    שומר עותק מקומי מלא של {file.name} למחשב או לטלפון
+                    שומר עותק מלא של {file.name} בתיקיית ההורדות במכשיר שלך
                   </p>
                 </div>
               </div>
-              <span className="text-xs text-purple-600 font-medium px-2 py-1 rounded bg-purple-500/10">הורד</span>
+              <span className="text-xs text-purple-600 font-medium px-2.5 py-1 rounded-lg bg-purple-500/10">הורד</span>
             </button>
 
-            {/* 4. Google Drive Link if exists */}
-            {file.drive_view_link && (
-              <a
-                href={file.drive_view_link}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full p-3 bg-card hover:bg-muted/60 border border-border rounded-xl flex items-center justify-between text-right transition-colors group"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                    <ExternalLink className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h5 className="font-semibold text-xs text-foreground">פתיחת הקובץ ב-Google Drive</h5>
-                    <p className="text-[11px] text-muted-foreground">
-                      צפייה ועריכה ישירה בענן Google Drive
-                    </p>
-                  </div>
-                </div>
-                <span className="text-xs text-amber-600 font-medium px-2 py-1 rounded bg-amber-500/10">פתח</span>
-              </a>
-            )}
-
-            {/* 5. Copy Details / Drive Link */}
+            {/* 4. Copy details (clean text without any links!) */}
             <button
+              type="button"
               onClick={handleCopyDetails}
-              className="w-full p-3 bg-card hover:bg-muted/60 border border-border rounded-xl flex items-center justify-between text-right transition-colors group"
+              className="w-full p-3 bg-card hover:bg-muted/60 border border-border rounded-xl flex items-center justify-between text-right transition-colors group cursor-pointer"
             >
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-muted text-muted-foreground group-hover:text-foreground transition-colors">
                   {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
                 </div>
                 <div>
-                  <h5 className="font-semibold text-xs text-foreground">
-                    {file.drive_view_link ? 'העתקת קישור שיתוף של Google Drive' : 'העתקת פרטי הקובץ ללוח'}
-                  </h5>
+                  <h5 className="font-semibold text-xs text-foreground">העתקת פרטי הקובץ (טקסט)</h5>
                   <p className="text-[11px] text-muted-foreground">
-                    {copied ? 'הועתק בהצלחה!' : 'העתקה מוכנה להדבקה בכל צ׳אט או מייל'}
+                    {copied ? 'הועתק בהצלחה!' : 'מעתיק את שם ותיאור הקובץ ללוח להדבקה קלה'}
                   </p>
                 </div>
               </div>
@@ -573,10 +579,11 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
               </span>
             </button>
 
-            {/* 6. Email Option */}
+            {/* 5. Email Option */}
             <button
+              type="button"
               onClick={handleEmailShare}
-              className="w-full p-3 bg-card hover:bg-muted/60 border border-border rounded-xl flex items-center justify-between text-right transition-colors group"
+              className="w-full p-3 bg-card hover:bg-muted/60 border border-border rounded-xl flex items-center justify-between text-right transition-colors group cursor-pointer"
             >
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-muted text-muted-foreground group-hover:text-foreground transition-colors">
@@ -593,13 +600,29 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
               </div>
               <span className="text-xs text-muted-foreground font-medium px-2 py-1 rounded bg-muted">שלח</span>
             </button>
+
+            {/* 6. Google Drive auxiliary view (Internal only, not for sharing as link) */}
+            {file.drive_view_link && (
+              <a
+                href={file.drive_view_link}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full p-2.5 bg-muted/20 hover:bg-muted/40 border border-dashed border-border rounded-xl flex items-center justify-between text-right transition-colors group cursor-pointer text-xs"
+              >
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>צפייה פנימית בענן Google Drive (עותק גיבוי בלבד)</span>
+                </div>
+                <span className="text-[11px] text-muted-foreground font-medium">פתח</span>
+              </a>
+            )}
           </div>
 
           {/* Hint info box */}
-          <div className="p-2.5 bg-muted/30 border border-border/50 rounded-xl flex items-start gap-2 text-muted-foreground text-[11px]">
-            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-primary" />
+          <div className="p-3 bg-primary/5 border border-primary/20 rounded-xl flex items-start gap-2.5 text-foreground text-xs leading-relaxed">
+            <Info className="w-4 h-4 shrink-0 mt-0.5 text-primary" />
             <span>
-              טיפ: כדי לשלוח הקלטה או תמונה בוואטסאפ ללקוח, לחץ על <strong>"הורד ושלח"</strong> – הקובץ יירד מיד ותועבר ישירות לוואטסאפ כדי לצרף אותו בלחיצת פלוס (+).
+              <strong>שיתוף כקובץ בלבד:</strong> כל פעולות השיתוף מעבירות את קובץ המדיה עצמו (קובץ שמע/תמונה) כקובץ מלא ולא כקישור, בדיוק כפי שביקשת.
             </span>
           </div>
         </div>
@@ -608,7 +631,7 @@ export const ShareMediaModal: React.FC<ShareMediaModalProps> = ({
         <div className="px-5 py-3 border-t border-border bg-muted/20 flex items-center justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-1.5 text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-lg transition-colors"
+            className="px-4 py-1.5 text-xs font-bold bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-lg transition-colors cursor-pointer"
           >
             סגור
           </button>

@@ -106,28 +106,38 @@ export async function sendDeviceNotification(
   };
 
   try {
-    // 1. Prefer Service Worker showNotification if active (works on background / Android / PWA)
+    // 1. Try Service Worker showNotification if already active and ready (with 300ms timeout)
     if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.ready;
-      if (reg && 'showNotification' in reg) {
-        await reg.showNotification(title, notifOptions);
-        return true;
+      try {
+        const reg = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 300)),
+        ]);
+        if (reg && 'showNotification' in reg) {
+          await reg.showNotification(title, notifOptions);
+          return true;
+        }
+      } catch {
+        // Continue to window notification fallback
       }
     }
 
-    // 2. Fallback to standard Window Notification
+    // 2. Standard Window Notification
     const notif = new Notification(title, notifOptions);
     notif.onclick = () => {
-      window.focus();
-      if (options.url && options.url !== window.location.pathname) {
-        window.location.href = options.url;
+      try {
+        window.focus();
+        if (options.url && options.url !== window.location.pathname) {
+          window.location.href = options.url;
+        }
+      } catch {
+        // Ignore
       }
       notif.close();
     };
     return true;
   } catch (err) {
     console.warn('Failed to dispatch device notification:', err);
-    // If constructor works fallback
     try {
       new Notification(title, { body: options.body, icon: '/pwa-192x192.png' });
       return true;
