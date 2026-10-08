@@ -17,6 +17,7 @@ import {
   FolderArchive,
   HardDrive,
   ExternalLink,
+  CheckCircle2,
 } from 'lucide-react';
 import { MediaFile, Client, Program } from '../types';
 import { dataStore } from '../lib/dataStore';
@@ -24,6 +25,7 @@ import { formatFileSize, formatHebrewDate } from '../lib/utils';
 import { AudioRecorder } from '../components/media/AudioRecorder';
 import { TransferMediaModal } from '../components/dialogs/TransferMediaModal';
 import { GoogleDriveModal } from '../components/dialogs/GoogleDriveModal';
+import { ShareMediaModal } from '../components/dialogs/ShareMediaModal';
 import { compressImageFile } from '../lib/indexedDbStorage';
 import { MediaImage } from '../components/media/MediaImage';
 
@@ -48,6 +50,8 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({ onNavigate }
   const [activePlayingUrl, setActivePlayingUrl] = useState<string | null>(null);
 
   const [transferringFile, setTransferringFile] = useState<MediaFile | null>(null);
+  const [shareModalFile, setShareModalFile] = useState<MediaFile | null>(null);
+  const [justUploadedNotice, setJustUploadedNotice] = useState<MediaFile | null>(null);
 
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
@@ -95,7 +99,7 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({ onNavigate }
           });
         }
         if (!dataUrl) return;
-        dataStore.addMediaFile({
+        const newMedia = dataStore.addMediaFile({
           name: file.name,
           url: dataUrl,
           type: file.type.startsWith('audio') ? 'audio' : 'image',
@@ -103,6 +107,8 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({ onNavigate }
           category: 'general',
           parent_id: 'general',
         });
+        setJustUploadedNotice(newMedia);
+        setTimeout(() => setJustUploadedNotice((cur) => (cur?.id === newMedia.id ? null : cur)), 8000);
       });
       e.target.value = '';
     }
@@ -112,7 +118,7 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({ onNavigate }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      dataStore.addMediaFile({
+      const newMedia = dataStore.addMediaFile({
         name: file.name,
         url: dataUrl,
         type: 'audio',
@@ -121,6 +127,8 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({ onNavigate }
         parent_id: 'general',
       });
       setShowRecorder(false);
+      setJustUploadedNotice(newMedia);
+      setTimeout(() => setJustUploadedNotice((cur) => (cur?.id === newMedia.id ? null : cur)), 8000);
     };
     reader.readAsDataURL(file);
   };
@@ -148,21 +156,8 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({ onNavigate }
     }
   };
 
-  const handleShare = async (file: MediaFile) => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: file.name,
-          text: `קובץ מדיה מ-Kabbalah CRM: ${file.name}`,
-          url: file.url,
-        });
-      } catch (e) {
-        console.log('Share canceled or error:', e);
-      }
-    } else {
-      navigator.clipboard.writeText(file.url);
-      alert('קישור לקובץ הועתק ללוח!');
-    }
+  const handleShare = (file: MediaFile) => {
+    setShareModalFile(file);
   };
 
   const saveRename = (id: string) => {
@@ -260,6 +255,25 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({ onNavigate }
           </label>
         </div>
       </div>
+
+      {/* Just Uploaded Quick Notification Banner */}
+      {justUploadedNotice && (
+        <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl flex items-center justify-between gap-3 text-xs text-emerald-800 dark:text-emerald-300 animate-in fade-in duration-200">
+          <div className="flex items-center gap-2 truncate">
+            <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
+            <span className="truncate">
+              הקובץ <strong>{justUploadedNotice.name}</strong> הועלה בהצלחה לספריית המדיה!
+            </span>
+          </div>
+          <button
+            onClick={() => setShareModalFile(justUploadedNotice)}
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl shrink-0 flex items-center gap-1.5 transition-colors shadow-xs"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            שתף קובץ עכשיו
+          </button>
+        </div>
+      )}
 
       {/* Audio Recorder Panel */}
       {showRecorder && (
@@ -549,6 +563,14 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({ onNavigate }
         onFilesImported={() => {
           refreshData();
         }}
+      />
+
+      {/* Share Media Modal */}
+      <ShareMediaModal
+        isOpen={!!shareModalFile}
+        onClose={() => setShareModalFile(null)}
+        file={shareModalFile}
+        client={shareModalFile ? clientsMap[shareModalFile.parent_id] : null}
       />
     </div>
   );

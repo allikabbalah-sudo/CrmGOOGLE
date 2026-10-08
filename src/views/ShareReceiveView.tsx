@@ -135,6 +135,7 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [targetType, setTargetType] = useState<'gallery' | 'session' | 'note'>('gallery');
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [savedSuccessClientId, setSavedSuccessClientId] = useState<string | null>(null);
 
   const clients = dataStore.getClients() || [];
@@ -585,7 +586,7 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
 
       setSavedSuccessClientId(selectedClientId);
     } catch (err: any) {
-      alert('שגיאה בשמירת הקובץ: ' + (err.message || err));
+      setSaveError('שגיאה בשמירת הקובץ: ' + (err.message || err));
     } finally {
       setIsSaving(false);
     }
@@ -678,6 +679,14 @@ export const ShareReceiveView: React.FC<ShareReceiveViewProps> = ({ onNavigate }
             </button>
           </div>
         </div>
+
+        {/* Save error message if present */}
+        {saveError && (
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-300 text-xs rounded-xl flex items-center justify-between">
+            <span>{saveError}</span>
+            <button onClick={() => setSaveError(null)} className="text-muted-foreground hover:text-foreground">✕</button>
+          </div>
+        )}
 
         {/* Loading state indicator */}
         {isLoadingShared && (

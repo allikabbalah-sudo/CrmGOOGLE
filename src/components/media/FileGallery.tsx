@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileAudio,
   FileImage,
@@ -14,12 +14,14 @@ import {
   Search,
   HardDrive,
   ExternalLink,
+  CheckCircle2,
 } from 'lucide-react';
-import { MediaFile, Program } from '../../types';
+import { MediaFile, Program, Client } from '../../types';
 import { formatFileSize, formatHebrewDate } from '../../lib/utils';
 import { AudioRecorder } from './AudioRecorder';
 import { TransferMediaModal } from '../dialogs/TransferMediaModal';
 import { GoogleDriveModal } from '../dialogs/GoogleDriveModal';
+import { ShareMediaModal } from '../dialogs/ShareMediaModal';
 import { MediaImage } from './MediaImage';
 import { dataStore } from '../../lib/dataStore';
 
@@ -29,6 +31,7 @@ interface FileGalleryProps {
   mediaFiles: MediaFile[];
   availablePrograms?: Program[];
   targetName?: string;
+  client?: Client;
   onUploadFile: (file: File) => void;
   onDeleteFile: (id: string) => void;
   onRenameFile: (id: string, newName: string) => void;
@@ -41,6 +44,7 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
   mediaFiles,
   availablePrograms = [],
   targetName,
+  client,
   onUploadFile,
   onDeleteFile,
   onRenameFile,
@@ -53,6 +57,24 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
   const [newNameInput, setNewNameInput] = useState('');
   const [activePlayingUrl, setActivePlayingUrl] = useState<string | null>(null);
   const [transferModalFile, setTransferModalFile] = useState<MediaFile | null>(null);
+  const [shareModalFile, setShareModalFile] = useState<MediaFile | null>(null);
+  const [justUploadedNotice, setJustUploadedNotice] = useState<string | null>(null);
+
+  const prevMediaCount = React.useRef(mediaFiles?.length || 0);
+
+  // If a new media file was added, highlight it with a quick share option
+  useEffect(() => {
+    const currentCount = mediaFiles?.length || 0;
+    if (currentCount > prevMediaCount.current && currentCount > 0) {
+      const newestFile = mediaFiles[0];
+      if (newestFile) {
+        setJustUploadedNotice(newestFile.name);
+        const timer = setTimeout(() => setJustUploadedNotice(null), 7000);
+        return () => clearTimeout(timer);
+      }
+    }
+    prevMediaCount.current = currentCount;
+  }, [mediaFiles]);
 
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
@@ -92,21 +114,8 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
     }
   };
 
-  const handleShare = async (file: MediaFile) => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: file.name,
-          text: `קובץ מדיה מ-Kabbalah CRM: ${file.name}`,
-          url: file.url,
-        });
-      } catch (e) {
-        console.log('Share canceled or error:', e);
-      }
-    } else {
-      navigator.clipboard.writeText(file.url);
-      alert('קישור לקובץ הועתק ללוח!');
-    }
+  const handleShare = (file: MediaFile) => {
+    setShareModalFile(file);
   };
 
   const startRename = (file: MediaFile) => {
@@ -128,6 +137,30 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
         onEnded={() => setActivePlayingUrl(null)}
         className="hidden"
       />
+
+      {/* Just Uploaded Quick Notification */}
+      {justUploadedNotice && (
+        <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl flex items-center justify-between gap-2 text-xs text-emerald-800 dark:text-emerald-300 animate-in fade-in duration-200">
+          <div className="flex items-center gap-2 truncate">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+            <span className="truncate">
+              הקובץ <strong>{justUploadedNotice}</strong> הועלה בהצלחה!
+            </span>
+          </div>
+          {mediaFiles.length > 0 && (
+            <button
+              onClick={() => {
+                const target = mediaFiles.find((m) => m.name === justUploadedNotice) || mediaFiles[0];
+                setShareModalFile(target);
+              }}
+              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg shrink-0 flex items-center gap-1 transition-colors shadow-xs"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              שתף עכשיו
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-card p-3 rounded-xl border border-border">
@@ -240,8 +273,8 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => handleShare(file)}
-                    className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors"
-                    title="שתף קובץ"
+                    className="p-1.5 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-lg transition-colors"
+                    title="שתף קובץ (WhatsApp, הורדה, מכשיר)"
                   >
                     <Share2 className="w-3.5 h-3.5" />
                   </button>
@@ -301,6 +334,14 @@ export const FileGallery: React.FC<FileGalleryProps> = ({
         isOpen={!!transferModalFile}
         onClose={() => setTransferModalFile(null)}
         file={transferModalFile}
+      />
+
+      {/* Share Media Modal */}
+      <ShareMediaModal
+        isOpen={!!shareModalFile}
+        onClose={() => setShareModalFile(null)}
+        file={shareModalFile}
+        client={client}
       />
     </div>
   );

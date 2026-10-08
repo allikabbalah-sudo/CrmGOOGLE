@@ -866,6 +866,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
                               parentId={prog.id}
                               category="program"
                               targetName={`${client.full_name} - ${prog.title}`}
+                              client={client}
                               mediaFiles={progMediaFiles}
                               availablePrograms={programs}
                               onUploadFile={(file) => handleUploadProgramFile(file, prog.id)}
@@ -1116,6 +1117,7 @@ export const ClientDetailView: React.FC<ClientDetailViewProps> = ({ clientId, on
             parentId={cleanClientId}
             category="client"
             targetName={client.full_name}
+            client={client}
             mediaFiles={mediaFiles}
             availablePrograms={programs}
             onUploadFile={handleUploadFile}
