@@ -1,10 +1,10 @@
 {
-  "projectId": "gen-lang-client-0468171140",
-  "appId": "1:569322222314:web:4e8daeda1f43114c29dd93",
-  "apiKey": "AIzaSyATj6E7U-Int2SVsvr4KeHGA8lyrOZvbq4",
-  "authDomain": "gen-lang-client-0468171140.firebaseapp.com",
-  "storageBucket": "gen-lang-client-0468171140.firebasestorage.app",
-  "messagingSenderId": "569322222314",
+  "projectId": "allicrm",
+  "appId": "1:30726969736:web:ed2bd3612864f07f9c823d",
+  "apiKey": "AIzaSyB6LHEgfLn0Hbwqp5lwbzV5lZD4SOm0GPk",
+  "authDomain": "allicrm.firebaseapp.com",
+  "storageBucket": "allicrm.firebasestorage.app",
+  "messagingSenderId": "30726969736",
   "measurementId": "",
   "oAuthClientId": "569322222314-2riaeujeptp3n53v02omemv36lbq7hkq.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
